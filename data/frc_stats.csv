@@ -1,0 +1,5 @@
+indicator,value,unit,reference_year,source,notes
+capital_market_value,11600000000000,MNT,2023,FRC Annual Report 2023,Total capital market value including listed equities and bonds
+otc_registered_debt,2441400000000,MNT,2023,FRC Annual Report 2023,Total OTC market registered debt instruments
+listed_companies,161,count,2023,FRC Annual Report 2023,Number of companies listed on MSE
+policy_rate,12.0,percent,2024,Bank of Mongolia,Benchmark policy rate as of 2024 per Trading Economics
