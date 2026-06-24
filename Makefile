@@ -1,31 +1,32 @@
 .PHONY: setup migrate ingest-mse ingest-otc serve-backend serve-frontend test lint
 
-# Copy .env.example if .env doesn't exist, then install Python deps
+# Venv lives in the WSL2 Linux filesystem to avoid NTFS permission issues.
+# On a fresh clone inside WSL2, run: bash infra/wsl2_setup.sh
+VENV := $(HOME)/.venvs/mongolia-capital-markets
+PYTHON := $(VENV)/bin/python
+PIP := $(VENV)/bin/pip
+
 setup:
 	@if [ ! -f .env ]; then cp .env.example .env; echo "Created .env from .env.example — fill in your credentials"; fi
-	python3.10 -m venv .venv
-	.venv/bin/pip install --upgrade pip
-	.venv/bin/pip install -r backend/requirements.txt
-	.venv/bin/playwright install chromium
-	@echo "Setup complete. Activate venv with: source .venv/bin/activate"
+	@echo "Venv is managed at $(VENV). Run 'bash infra/wsl2_setup.sh' to create it."
 
 migrate:
-	.venv/bin/alembic upgrade head
+	cd backend && $(VENV)/bin/alembic upgrade head
 
 ingest-mse:
-	.venv/bin/python scripts/ingest_mse.py
+	$(PYTHON) scripts/ingest_mse.py
 
 ingest-otc:
-	.venv/bin/python scripts/ingest_otc.py
+	$(PYTHON) scripts/ingest_otc.py
 
 serve-backend:
-	.venv/bin/uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
+	$(VENV)/bin/uvicorn backend.main:app --reload --host 0.0.0.0 --port 8000
 
 serve-frontend:
 	cd frontend && npm run dev
 
 test:
-	.venv/bin/pytest tests/ -v
+	$(VENV)/bin/pytest tests/ -v
 
 lint:
-	.venv/bin/ruff check backend/ scripts/ tests/
+	$(VENV)/bin/ruff check backend/ scripts/ tests/
