@@ -1,4 +1,4 @@
-.PHONY: setup migrate ingest-mse ingest-otc serve-backend serve-frontend test lint
+.PHONY: setup migrate seed-db ingest-mse ingest-otc serve-backend serve-frontend test lint
 
 # Venv lives in the WSL2 Linux filesystem to avoid NTFS permission issues.
 # On a fresh clone inside WSL2, run: bash infra/wsl2_setup.sh
@@ -12,6 +12,9 @@ setup:
 
 migrate:
 	cd backend && $(VENV)/bin/alembic upgrade head
+
+seed-db:
+	$(PYTHON) db/seed.py
 
 ingest-mse:
 	$(PYTHON) scripts/ingest_mse.py
