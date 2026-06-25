@@ -48,10 +48,12 @@ def test_to_int_empty():
 
 def _make_cells(ticker="MIE", open_="1200", high="1300", low="1180",
                 last="1250", prev_close="1200", close="1250",
-                change="+4.17%", volume="4,500", value="5,625,000",
-                bid_price="1240", bid_qty="200", ask_price="1260", ask_qty="150"):
+                change="50", change_pct="4.17%", volume="4,500", value="5,625,000",
+                bid_qty="200", bid_price="1240", ask_qty="150", ask_price="1260"):
+    # Matches live COL mapping (0-indexed): ticker,open,high,low,last,prev_close,close,
+    # change,change_pct,volume,value,bid_qty,bid_price,ask_qty,ask_price
     return [ticker, open_, high, low, last, prev_close, close,
-            change, volume, value, bid_price, bid_qty, ask_price, ask_qty]
+            change, change_pct, volume, value, bid_qty, bid_price, ask_qty, ask_price]
 
 
 def test_parse_row_valid():
