@@ -33,19 +33,24 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 
-MSE_URL = "https://mse.mn/mn/markets/todaytrade"
+MSE_URL = "https://mse.mn/todays-trade"
 TABLE_ROW_SELECTOR = "table tbody tr"
 PAGE_TIMEOUT_MS = 20_000
 
-# Column index mapping — verify with --discover if rows look wrong
-# Expected MSE today's-trade columns (0-indexed):
-#   0: ticker  1: open  2: high  3: low  4: last  5: prev_close
-#   6: close   7: change_pct  8: volume  9: value
-#   10: bid_price  11: bid_qty  12: ask_price  13: ask_qty
+# Column index mapping — confirmed from live page dump 2026-06-25
+# MSE today's-trade columns (0-indexed, 15 cells per row):
+#   0: Симбол (ticker)
+#   1: Нээлт (open)        2: Дээд (high)          3: Доод (low)
+#   4: Сүүлийн ханш (last) 5: Өмнөх өдрийн хаалт (prev_close)
+#   6: Хаалтын ханш (close) 7: Өөрчлөлт (change)  8: Өөрчлөлт/% (change_pct)
+#   9: Ширхэг (volume)     10: Нийт мөнгөн дүн (value)
+#   11: Авах тоо (bid_qty) 12: Авах үнэ (bid_price)
+#   13: Зарах тоо (ask_qty) 14: Зарах үнэ (ask_price)
 COL = {
     "ticker": 0, "open": 1, "high": 2, "low": 3, "last": 4,
-    "prev_close": 5, "change_pct": 7, "volume": 8, "value": 9,
-    "bid_price": 10, "bid_qty": 11, "ask_price": 12, "ask_qty": 13,
+    "prev_close": 5, "close": 6, "change": 7, "change_pct": 8,
+    "volume": 9, "value": 10,
+    "bid_qty": 11, "bid_price": 12, "ask_qty": 13, "ask_price": 14,
 }
 
 
@@ -72,25 +77,32 @@ def _to_int(text: str) -> int | None:
 
 def parse_row(cells: list[str]) -> dict | None:
     """Extract a quote dict from a list of cell text values. Returns None for header/empty rows."""
-    if len(cells) < 10:
+    if len(cells) < 11:
         return None
     ticker = cells[COL["ticker"]].strip().upper()
-    if not ticker or ticker in ("TICKER", "№", "#"):
+    if not ticker or ticker in ("TICKER", "СИМБОЛ", "№", "#"):
         return None
+
+    def get(key):
+        idx = COL[key]
+        return cells[idx] if len(cells) > idx else ""
+
     return {
         "ticker": ticker,
-        "open": _to_decimal(cells[COL["open"]]),
-        "high": _to_decimal(cells[COL["high"]]),
-        "low": _to_decimal(cells[COL["low"]]),
-        "last": _to_decimal(cells[COL["last"]]),
-        "prev_close": _to_decimal(cells[COL["prev_close"]]),
-        "change_pct": _to_decimal(cells[COL["change_pct"]]) if len(cells) > COL["change_pct"] else None,
-        "volume": _to_int(cells[COL["volume"]]) if len(cells) > COL["volume"] else None,
-        "value": _to_decimal(cells[COL["value"]]) if len(cells) > COL["value"] else None,
-        "bid_price": _to_decimal(cells[COL["bid_price"]]) if len(cells) > COL["bid_price"] else None,
-        "bid_qty": _to_int(cells[COL["bid_qty"]]) if len(cells) > COL["bid_qty"] else None,
-        "ask_price": _to_decimal(cells[COL["ask_price"]]) if len(cells) > COL["ask_price"] else None,
-        "ask_qty": _to_int(cells[COL["ask_qty"]]) if len(cells) > COL["ask_qty"] else None,
+        "open": _to_decimal(get("open")),
+        "high": _to_decimal(get("high")),
+        "low": _to_decimal(get("low")),
+        "last": _to_decimal(get("last")),
+        "prev_close": _to_decimal(get("prev_close")),
+        "close": _to_decimal(get("close")),
+        "change": _to_decimal(get("change")),
+        "change_pct": _to_decimal(get("change_pct")),
+        "volume": _to_int(get("volume")),
+        "value": _to_decimal(get("value")),
+        "bid_qty": _to_int(get("bid_qty")),
+        "bid_price": _to_decimal(get("bid_price")),
+        "ask_qty": _to_int(get("ask_qty")),
+        "ask_price": _to_decimal(get("ask_price")),
         "trade_time": datetime.now(timezone.utc),
     }
 
@@ -99,23 +111,35 @@ def parse_row(cells: list[str]) -> dict | None:
 def scrape_quotes(discover: bool = False) -> list[dict]:
     chromium_path = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", "/snap/bin/chromium")
     rows: list[dict] = []
+    dump_path = _project_root / "logs" / "mse_page_dump.html"
 
     with sync_playwright() as p:
         browser = p.chromium.launch(executable_path=chromium_path, headless=True)
         page = browser.new_page()
-        try:
-            page.goto(MSE_URL, timeout=PAGE_TIMEOUT_MS)
-            page.wait_for_selector(TABLE_ROW_SELECTOR, timeout=PAGE_TIMEOUT_MS)
-        except PWTimeout:
-            log.warning("Timed out waiting for MSE table — page may have changed or be unavailable")
+
+        # In discover mode: navigate and wait for network to settle, then dump
+        # regardless of whether the table selector matched.
+        if discover:
+            try:
+                # MSE uses Next.js SSR — data is in initial HTML, no need for networkidle
+                page.goto(MSE_URL, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
+            except PWTimeout:
+                log.warning("Page did not load within timeout — dumping whatever loaded")
+            dump_path.write_text(page.content(), encoding="utf-8")
+            log.info("Discover mode: HTML saved to %s (%d bytes)", dump_path, dump_path.stat().st_size)
+            log.info("Search the file for 'tbody', 'tr', 'td' or the first ticker symbol to find the table structure")
             browser.close()
             return []
 
-        if discover:
-            dump_path = _project_root / "logs" / "mse_page_dump.html"
+        # Normal / dry-run mode: SSR page — data is in initial HTML
+        try:
+            page.goto(MSE_URL, wait_until="domcontentloaded", timeout=PAGE_TIMEOUT_MS)
+            page.wait_for_selector(TABLE_ROW_SELECTOR, timeout=10_000)
+        except PWTimeout:
+            log.warning("Timed out waiting for MSE table — page may have changed or be unavailable")
+            # Save HTML for debugging even in normal mode
             dump_path.write_text(page.content(), encoding="utf-8")
-            log.info("Discover mode: page HTML saved to %s", dump_path)
-            log.info("Open that file in a browser or text editor to verify column indices in COL dict")
+            log.warning("Page HTML saved to %s for inspection", dump_path)
             browser.close()
             return []
 
@@ -142,23 +166,26 @@ def get_db_conn():
 
 UPSERT_SQL = """
 INSERT INTO quotes (
-    ticker, trade_time, open, high, low, last, prev_close, change_pct,
-    volume, value, bid_price, bid_qty, ask_price, ask_qty
+    ticker, trade_time, open, high, low, last, prev_close, close, change, change_pct,
+    volume, value, bid_qty, bid_price, ask_qty, ask_price
 ) VALUES (
     %(ticker)s, %(trade_time)s, %(open)s, %(high)s, %(low)s, %(last)s,
-    %(prev_close)s, %(change_pct)s, %(volume)s, %(value)s,
-    %(bid_price)s, %(bid_qty)s, %(ask_price)s, %(ask_qty)s
+    %(prev_close)s, %(close)s, %(change)s, %(change_pct)s, %(volume)s, %(value)s,
+    %(bid_qty)s, %(bid_price)s, %(ask_qty)s, %(ask_price)s
 )
 ON CONFLICT (ticker, trade_time) DO UPDATE SET
     last       = EXCLUDED.last,
+    close      = EXCLUDED.close,
     high       = EXCLUDED.high,
     low        = EXCLUDED.low,
+    change     = EXCLUDED.change,
+    change_pct = EXCLUDED.change_pct,
     volume     = EXCLUDED.volume,
     value      = EXCLUDED.value,
-    bid_price  = EXCLUDED.bid_price,
     bid_qty    = EXCLUDED.bid_qty,
-    ask_price  = EXCLUDED.ask_price,
-    ask_qty    = EXCLUDED.ask_qty
+    bid_price  = EXCLUDED.bid_price,
+    ask_qty    = EXCLUDED.ask_qty,
+    ask_price  = EXCLUDED.ask_price
 """
 
 ENSURE_TICKER_SQL = """
