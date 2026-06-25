@@ -1,23 +1,28 @@
+import os
 from logging.config import fileConfig
+from pathlib import Path
 
+from dotenv import load_dotenv
 from sqlalchemy import engine_from_config
 from sqlalchemy import pool
 
 from alembic import context
 
-# this is the Alembic Config object, which provides
-# access to the values within the .ini file in use.
+# Load .env from the project root (two levels up from backend/migrations/)
+_project_root = Path(__file__).resolve().parents[2]
+load_dotenv(_project_root / ".env")
+
 config = context.config
 
-# Interpret the config file for Python logging.
-# This line sets up loggers basically.
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
 
-# add your model's MetaData object here
-# for 'autogenerate' support
-# from myapp import mymodel
-# target_metadata = mymodel.Base.metadata
+# Inject DATABASE_SYNC_URL (psycopg2) into alembic config at runtime
+_db_url = os.environ.get("DATABASE_SYNC_URL") or os.environ.get("DATABASE_URL", "")
+if _db_url.startswith("postgresql+asyncpg"):
+    _db_url = _db_url.replace("postgresql+asyncpg", "postgresql+psycopg2", 1)
+config.set_main_option("sqlalchemy.url", _db_url)
+
 target_metadata = None
 
 # other values from the config, defined by the needs of env.py,
