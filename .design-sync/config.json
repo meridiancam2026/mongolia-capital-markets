@@ -1,0 +1,23 @@
+{
+  "projectId": "17b19ed6-6d17-4baa-8d36-55708321c25b",
+  "shape": "package",
+  "pkg": "frontend",
+  "globalName": "MongoliaCM",
+  "cssEntry": "src/index.css",
+  "readmeHeader": ".design-sync/conventions.md",
+  "componentSrcMap": {
+    "Spinner":          "src/components/ui/Spinner.tsx",
+    "ErrorBanner":      "src/components/ui/ErrorBanner.tsx",
+    "Modal":            "src/components/ui/Modal.tsx",
+    "SummaryStrip":     "src/components/market/SummaryStrip.tsx",
+    "QuotesTable":      "src/components/market/QuotesTable.tsx",
+    "PriceHistoryChart":"src/components/market/PriceHistoryChart.tsx",
+    "FxCard":           "src/components/macro/FxCard.tsx",
+    "MarketStatsCards": "src/components/macro/MarketStatsCards.tsx",
+    "OtcTable":         "src/components/otc/OtcTable.tsx",
+    "RegulatoryTable":  "src/components/regulatory/RegulatoryTable.tsx"
+  },
+  "overrides": {
+    "Modal": { "cardMode": "single", "viewport": "900x600" }
+  }
+}

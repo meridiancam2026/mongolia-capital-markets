@@ -1,0 +1,54 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  *, *::before, *::after {
+    box-sizing: border-box;
+  }
+  html, body, #root {
+    margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    overflow: hidden;
+  }
+  body {
+    font-family: 'IBM Plex Mono', ui-monospace, SFMono-Regular, monospace;
+    background-color: #e6ede1;
+    color: #1f2a18;
+    -webkit-font-smoothing: antialiased;
+  }
+}
+
+@keyframes mcm-led {
+  0%   { opacity: 1; }
+  50%  { opacity: 0.3; }
+  100% { opacity: 1; }
+}
+
+@keyframes mcm-flash-up {
+  0%   { background-color: rgba(47, 143, 78, 0.18); }
+  100% { background-color: transparent; }
+}
+
+@keyframes mcm-flash-down {
+  0%   { background-color: rgba(196, 69, 59, 0.15); }
+  100% { background-color: transparent; }
+}
+
+.led-sidebar {
+  animation: mcm-led 2s ease-in-out infinite;
+}
+
+.led-header {
+  animation: mcm-led 1.6s ease-in-out infinite;
+}
+
+.row-flash-up {
+  animation: mcm-flash-up 0.65s ease-out forwards;
+}
+
+.row-flash-down {
+  animation: mcm-flash-down 0.65s ease-out forwards;
+}
