@@ -141,7 +141,7 @@ export function QuotesTable({ quotes, securities, onSelectTicker }: Props) {
                   <td style={{ ...tdBase, fontWeight: 600, color: S.accent, fontSize: 11 }}>
                     {(() => {
                       const sec = securities?.get(q.ticker);
-                      const tooltip = [sec?.name, sec?.sector].filter(Boolean).join(' · ');
+                      const tooltip = [sec?.name, sec?.sector, sec?.description].filter(Boolean).join('\n');
                       return (
                         <div title={tooltip || undefined} style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
                           <span>{q.ticker}</span>

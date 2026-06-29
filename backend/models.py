@@ -20,6 +20,7 @@ class Security(Base):
     sector: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
     listing_date: Mapped[Optional[date]] = mapped_column(Date, nullable=True)
     status: Mapped[Optional[str]] = mapped_column(String(10), default="active")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
 
 
 class Quote(Base):

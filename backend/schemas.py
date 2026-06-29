@@ -18,6 +18,7 @@ class SecurityOut(BaseModel):
     sector: Optional[str] = None
     listing_date: Optional[date] = None
     status: Optional[str] = None
+    description: Optional[str] = None
 
 
 class QuoteOut(BaseModel):

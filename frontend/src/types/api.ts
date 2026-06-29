@@ -8,6 +8,7 @@ export interface Security {
   sector: string | null;
   listing_date: string | null;
   status: string | null;
+  description: string | null;
 }
 
 export interface Quote {
