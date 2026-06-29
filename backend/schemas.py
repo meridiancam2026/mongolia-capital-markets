@@ -99,6 +99,27 @@ class RegulatoryStatOut(BaseModel):
         return _dec(v)
 
 
+class OtcBondRegistryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    bond_name: str
+    board_category: Optional[str] = None
+    sector: Optional[str] = None
+    issue_date: Optional[date] = None
+    currency: Optional[str] = None
+    maturity_months: Optional[int] = None
+    coupon_rate_raw: Optional[str] = None
+    coupon_rate: Optional[Decimal] = None
+    underwriter: Optional[str] = None
+    status: Optional[str] = None
+    scraped_date: date
+
+    @field_serializer("coupon_rate")
+    def serialize_decimal(self, v: Optional[Decimal]) -> Optional[str]:
+        return _dec(v)
+
+
 class NewsOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
