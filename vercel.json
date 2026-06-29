@@ -1,9 +1,3 @@
 {
-  "experimentalServices": {
-    "frontend": {
-      "root": "frontend",
-      "routePrefix": "/",
-      "framework": "vite"
-    }
-  }
+  "rewrites": [{ "source": "/(.*)", "destination": "/index.html" }]
 }
