@@ -3,14 +3,16 @@ import { MarketView } from './views/MarketView';
 import { OtcView } from './views/OtcView';
 import { MacroView } from './views/MacroView';
 import { RegulatoryView } from './views/RegulatoryView';
+import { CommoditiesView } from './views/CommoditiesView';
 
-type Tab = 'market' | 'otc' | 'macro' | 'regulatory';
+type Tab = 'market' | 'otc' | 'macro' | 'regulatory' | 'commodities';
 
 const TABS: { id: Tab; label: string; short: string }[] = [
-  { id: 'market',     label: 'Equities',   short: 'EQ'  },
-  { id: 'otc',        label: 'OTC Bonds',  short: 'OTC' },
-  { id: 'macro',      label: 'Macro',      short: 'MCR' },
-  { id: 'regulatory', label: 'Regulatory', short: 'REG' },
+  { id: 'market',      label: 'Equities',    short: 'EQ'  },
+  { id: 'otc',         label: 'OTC Bonds',   short: 'OTC' },
+  { id: 'macro',       label: 'Macro',       short: 'MCR' },
+  { id: 'regulatory',  label: 'Regulatory',  short: 'REG' },
+  { id: 'commodities', label: 'Commodities', short: 'CMD' },
 ];
 
 const S = {
@@ -128,7 +130,7 @@ export default function App() {
 
         {/* Content — display:none preserves mount & hook state across tabs */}
         <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-          {(['market', 'otc', 'macro', 'regulatory'] as const).map((tab) => (
+          {(['market', 'otc', 'macro', 'regulatory', 'commodities'] as const).map((tab) => (
             <div
               key={tab}
               style={{
@@ -137,10 +139,11 @@ export default function App() {
                 padding: '22px 24px',
               }}
             >
-              {tab === 'market'     && <MarketView />}
-              {tab === 'otc'        && <OtcView />}
-              {tab === 'macro'      && <MacroView />}
-              {tab === 'regulatory' && <RegulatoryView />}
+              {tab === 'market'      && <MarketView />}
+              {tab === 'otc'         && <OtcView />}
+              {tab === 'macro'       && <MacroView />}
+              {tab === 'regulatory'  && <RegulatoryView />}
+              {tab === 'commodities' && <CommoditiesView />}
             </div>
           ))}
         </div>

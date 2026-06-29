@@ -5,10 +5,31 @@ interface Props {
   indicators: MacroIndicator[];
 }
 
-const STAT_CONFIG: Record<string, { label: string; color: string; tag: string }> = {
-  MASD_SECONDARY_MARKET_MNT: { label: 'Secondary Market', color: '#2b6cb0', tag: 'SEC' },
-  MASD_PRIMARY_MARKET_MNT:   { label: 'Primary Market',   color: '#2f8f4e', tag: 'PRI' },
-  MASD_OTC_BOND_BALANCE_MNT: { label: 'OTC Bond Balance', color: '#b07d18', tag: 'OTC' },
+interface StatConfig {
+  label: string;
+  color: string;
+  tag: string;
+  format?: (v: string | null) => string;
+}
+
+const STAT_CONFIG: Record<string, StatConfig> = {
+  MASD_SECONDARY_MARKET_MNT: { label: 'Secondary Market',    color: '#2b6cb0', tag: 'SEC' },
+  MASD_PRIMARY_MARKET_MNT:   { label: 'Primary Market',      color: '#2f8f4e', tag: 'PRI' },
+  MASD_OTC_BOND_BALANCE_MNT: { label: 'OTC Bond Balance',    color: '#b07d18', tag: 'OTC' },
+  INFLATION_CPI_YOY: {
+    label: 'Inflation (CPI YoY)',
+    color: '#c4453b',
+    tag: 'CPI',
+    format: (v) => v != null ? `${parseFloat(v).toFixed(1)}%` : '—',
+  },
+  FOREIGN_RESERVES_USD_MN: {
+    label: 'FX Reserves',
+    color: '#2b6cb0',
+    tag: 'RES',
+    format: (v) => v != null
+      ? `$${parseFloat(v).toLocaleString(undefined, { maximumFractionDigits: 0 })}mn`
+      : '—',
+  },
 };
 
 const S = {
@@ -47,7 +68,7 @@ export function MarketStatsCards({ indicators }: Props) {
             </div>
             {/* Value */}
             <div style={{ fontSize: 22, fontWeight: 600, color: cfg.color, letterSpacing: '-0.02em', lineHeight: 1 }}>
-              {formatMNT(s.value)}
+              {cfg.format ? cfg.format(s.value) : formatMNT(s.value)}
             </div>
             {/* Meta */}
             <div style={{ marginTop: 10, paddingTop: 8, borderTop: `1px solid ${S.row}`, fontSize: 9, color: S.faint, letterSpacing: '0.05em' }}>

@@ -1,16 +1,22 @@
 """
-Macro data ingestion — FX rates and policy rate.
+Macro data ingestion — FX rates, policy rate, inflation, and FX reserves.
 
 Usage:
-    python scripts/ingest_macro.py                        # fetch FX via OpenExchange (default)
-    python scripts/ingest_macro.py --dry-run              # print rows without DB write
-    python scripts/ingest_macro.py --source bom           # scrape mongolbank.mn (Playwright)
-    python scripts/ingest_macro.py --source bom --discover  # dump BOM HTML, do not insert
-    python scripts/ingest_macro.py --source te            # use Trading Economics API (key required)
-    python scripts/ingest_macro.py --source fluentax      # use Fluentax API (key required)
+    python scripts/ingest_macro.py                               # FX via OpenExchange (default)
+    python scripts/ingest_macro.py --dry-run                     # print rows without DB write
+    python scripts/ingest_macro.py --source bom                  # scrape mongolbank.mn (Playwright)
+    python scripts/ingest_macro.py --source bom --discover       # dump BOM HTML, do not insert
+    python scripts/ingest_macro.py --source te                   # Trading Economics API (key required)
+    python scripts/ingest_macro.py --source fluentax             # Fluentax API (key required)
+    python scripts/ingest_macro.py --source bom_inflation        # scrape CPI YoY from BOM stats
+    python scripts/ingest_macro.py --source bom_inflation --discover  # dump BOM stats HTML
+    python scripts/ingest_macro.py --source bom_reserves         # scrape FX reserves from BOM
+    python scripts/ingest_macro.py --source bom_reserves --discover   # dump BOM reserves HTML
+    python scripts/ingest_macro.py --source wb_macro             # World Bank API: CPI + FX reserves (free, no key)
 
 Default source 'openexchange' uses open.er-api.com — free, no API key, ~daily updates.
 Switch to 'te' or 'fluentax' once API keys are obtained for official BOM data.
+Use 'wb_macro' when mongolbank.mn is unreachable — World Bank provides annual Mongolia data.
 """
 import argparse
 import logging
@@ -47,6 +53,8 @@ OPENEXCHANGE_URL = "https://open.er-api.com/v6/latest/USD"
 # BOM direct URLs — requires Playwright; may time out depending on network conditions
 BOM_FX_URL = "https://www.mongolbank.mn/mn/p/valuta"
 BOM_POLICY_URL = "https://www.mongolbank.mn/mn/p/mprate"
+BOM_STATS_URL = "https://www.mongolbank.mn/en/p/statistics"
+BOM_RESERVES_URL = "https://www.mongolbank.mn/en/p/reserves"
 PAGE_TIMEOUT_MS = 20_000
 
 # Currencies to extract (ISO code → indicator name). All expressed as MNT per 1 unit.
@@ -239,6 +247,117 @@ def scrape_bom(discover: bool = False) -> list[dict]:
     return rows
 
 
+# ── BOM inflation parser ───────────────────────────────────────────────────────
+def parse_bom_inflation(html: str) -> list[dict]:
+    """Extract CPI YoY % from BOM statistics page HTML.
+
+    BOM publishes monthly CPI data. This parser scans tables for a header
+    containing 'inflat' or 'cpi' and extracts the first plausible percentage.
+    Run --source bom_inflation --discover to inspect the actual HTML if results
+    are empty.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    ref_date = date.today().replace(day=1)
+
+    for table in soup.find_all("table"):
+        header_texts = " ".join(
+            th.get_text(strip=True).lower()
+            for th in table.find_all(["th", "td"])
+        )
+        if not any(kw in header_texts for kw in ("inflat", "cpi", "үнэ өсөлт", "үнийн өсөлт")):
+            continue
+        for row in table.find_all("tr"):
+            cells = [td.get_text(strip=True) for td in row.find_all(["td", "th"])]
+            for cell in cells:
+                val = _to_decimal(cell)
+                # Mongolia CPI YoY typically 2–25%
+                if val is not None and Decimal("0") < val < Decimal("25"):
+                    log.info("Found candidate CPI YoY rate: %s%%", val)
+                    return [{
+                        "indicator": "INFLATION_CPI_YOY",
+                        "value": val,
+                        "reference_date": ref_date,
+                        "source": "BOM",
+                    }]
+
+    log.warning("Could not extract CPI from BOM stats page — run --source bom_inflation --discover")
+    return []
+
+
+def scrape_bom_inflation(discover: bool = False) -> list[dict]:
+    """Scrape CPI YoY inflation rate from mongolbank.mn."""
+    html = _fetch_html(BOM_STATS_URL)
+
+    if discover:
+        if html:
+            p = _project_root / "logs" / "bom_inflation_dump.html"
+            p.write_text(html, encoding="utf-8")
+            log.info("BOM inflation HTML saved to %s (%d bytes)", p, p.stat().st_size)
+        return []
+
+    if not html:
+        log.error("Could not fetch BOM stats page — check network / Playwright")
+        return []
+
+    return parse_bom_inflation(html)
+
+
+# ── BOM reserves parser ────────────────────────────────────────────────────────
+def parse_bom_reserves(html: str) -> list[dict]:
+    """Extract FX reserves (USD millions) from BOM reserves page HTML.
+
+    BOM publishes monthly international reserve data. This parser scans tables
+    for a header containing 'reserv' or 'нөөц' and extracts the first value
+    in the plausible range for Mongolia (500–20,000 USD mn).
+    Run --source bom_reserves --discover to inspect the actual HTML if results
+    are empty.
+    """
+    soup = BeautifulSoup(html, "html.parser")
+    ref_date = date.today().replace(day=1)
+
+    for table in soup.find_all("table"):
+        header_texts = " ".join(
+            th.get_text(strip=True).lower()
+            for th in table.find_all(["th", "td"])
+        )
+        if not any(kw in header_texts for kw in ("reserv", "нөөц", "foreign asset")):
+            continue
+        for row in table.find_all("tr"):
+            cells = [td.get_text(strip=True) for td in row.find_all(["td", "th"])]
+            for cell in cells:
+                val = _to_decimal(cell)
+                # Mongolia FX reserves typically 3,000–6,000 USD mn
+                if val is not None and Decimal("500") < val < Decimal("20000"):
+                    log.info("Found candidate FX reserves: %s USD mn", val)
+                    return [{
+                        "indicator": "FOREIGN_RESERVES_USD_MN",
+                        "value": val,
+                        "reference_date": ref_date,
+                        "source": "BOM",
+                    }]
+
+    log.warning("Could not extract FX reserves from BOM page — run --source bom_reserves --discover")
+    return []
+
+
+def scrape_bom_reserves(discover: bool = False) -> list[dict]:
+    """Scrape FX reserves (USD millions) from mongolbank.mn."""
+    html = _fetch_html(BOM_RESERVES_URL)
+
+    if discover:
+        if html:
+            p = _project_root / "logs" / "bom_reserves_dump.html"
+            p.write_text(html, encoding="utf-8")
+            log.info("BOM reserves HTML saved to %s (%d bytes)", p, p.stat().st_size)
+        return []
+
+    if not html:
+        log.error("Could not fetch BOM reserves page — check network / Playwright")
+        return []
+
+    return parse_bom_reserves(html)
+
+
 # ── API stubs ──────────────────────────────────────────────────────────────────
 def scrape_trading_economics() -> list[dict]:
     api_key = os.environ.get("TRADING_ECONOMICS_API_KEY", "placeholder")
@@ -256,6 +375,61 @@ def scrape_fluentax() -> list[dict]:
             "Set FLUENTAX_API_KEY in .env. See data/api_notes/bom_providers.md."
         )
     raise NotImplementedError("Fluentax integration not yet implemented")
+
+
+# ── World Bank macro source (Mongolia CPI + FX reserves) ──────────────────────
+_WB_API_BASE = "https://api.worldbank.org/v2"
+
+# indicator_code → (country_iso3, wb_series_id, scale_factor, source_label)
+# FI.RES.TOTL.CD is in current USD; divide by 1e6 to store as USD millions.
+_WB_MACRO_INDICATORS: dict[str, tuple[str, str, float, str]] = {
+    "INFLATION_CPI_YOY":       ("MNG", "FP.CPI.TOTL.ZG", 1.0,  "World Bank"),
+    "FOREIGN_RESERVES_USD_MN": ("MNG", "FI.RES.TOTL.CD",  1e-6, "World Bank"),
+}
+
+
+def scrape_wb_macro() -> list[dict]:
+    """Fetch Mongolia CPI inflation and FX reserves from the World Bank DataBank API.
+
+    Free, no API key required. Data is annual; reference_date stored as Jan 1 of the year.
+    Preferred fallback when mongolbank.mn is unreachable via Playwright.
+    """
+    rows: list[dict] = []
+    session = requests.Session()
+    session.headers.update({"User-Agent": "Mongolia-Capital-Markets/1.0"})
+
+    for indicator_code, (country, wb_id, scale, src) in _WB_MACRO_INDICATORS.items():
+        url = f"{_WB_API_BASE}/country/{country}/indicator/{wb_id}?format=json&mrv=5"
+        try:
+            resp = session.get(url, timeout=15)
+            resp.raise_for_status()
+            payload = resp.json()
+        except Exception as exc:
+            log.error("World Bank API request failed for %s: %s", indicator_code, exc)
+            continue
+
+        if not isinstance(payload, list) or len(payload) < 2 or not payload[1]:
+            log.warning("No data returned from World Bank for %s", indicator_code)
+            continue
+
+        for entry in payload[1]:
+            raw = entry.get("value")
+            year_str = entry.get("date", "")
+            if raw is None or not year_str:
+                continue
+            try:
+                year = int(year_str)
+                ref_date = date(year, 1, 1)
+                value = Decimal(str(round(float(raw) * scale, 4)))
+            except (ValueError, TypeError) as exc:
+                log.debug("Skipping WB entry %s/%s: %s", indicator_code, year_str, exc)
+                continue
+            rows.append({"indicator": indicator_code, "value": value,
+                         "reference_date": ref_date, "source": src})
+            log.info("%s  %s = %s", indicator_code, year_str, value)
+
+    rows.sort(key=lambda r: (r["indicator"], r["reference_date"]))
+    return rows
 
 
 # ── database ───────────────────────────────────────────────────────────────────
@@ -296,12 +470,12 @@ def main():
     parser = argparse.ArgumentParser(description="Ingest macro indicators (FX rates, policy rate)")
     parser.add_argument(
         "--source",
-        choices=["openexchange", "bom", "te", "fluentax"],
+        choices=["openexchange", "bom", "te", "fluentax", "bom_inflation", "bom_reserves", "wb_macro"],
         default="openexchange",
-        help="Data source (default: openexchange — free, no key needed)",
+        help="Data source (default: openexchange — free, no key needed); wb_macro fetches Mongolia CPI+reserves from World Bank",
     )
     parser.add_argument("--discover", action="store_true",
-                        help="[bom source only] Save raw HTML and exit")
+                        help="[bom/bom_inflation/bom_reserves] Save raw HTML and exit")
     parser.add_argument("--dry-run", action="store_true",
                         help="Print rows without writing to DB")
     args = parser.parse_args()
@@ -312,6 +486,12 @@ def main():
         rows = scrape_trading_economics()
     elif args.source == "fluentax":
         rows = scrape_fluentax()
+    elif args.source == "bom_inflation":
+        rows = scrape_bom_inflation(discover=args.discover)
+    elif args.source == "bom_reserves":
+        rows = scrape_bom_reserves(discover=args.discover)
+    elif args.source == "wb_macro":
+        rows = scrape_wb_macro()
     else:
         rows = scrape_fx_openexchange()
 

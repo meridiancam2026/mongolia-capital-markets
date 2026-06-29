@@ -58,7 +58,7 @@ export function MacroView() {
           <div style={{ borderTop: `1px solid ${S.border}`, margin: '0 0 24px' }} />
 
           <section>
-            <SectionLabel>MASD MARKET TOTALS — CUMULATIVE BALANCES</SectionLabel>
+            <SectionLabel>MACRO INDICATORS — MARKET TOTALS · INFLATION · FX RESERVES</SectionLabel>
             <MarketStatsCards indicators={allMacro} />
           </section>
         </>

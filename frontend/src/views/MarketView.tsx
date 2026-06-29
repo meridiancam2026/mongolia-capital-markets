@@ -6,9 +6,11 @@ import { Modal } from '../components/ui/Modal';
 import { Spinner } from '../components/ui/Spinner';
 import { ErrorBanner } from '../components/ui/ErrorBanner';
 import { useQuotes } from '../hooks/useQuotes';
+import { useSecurities } from '../hooks/useSecurities';
 
 export function MarketView() {
   const { data, loading, error, lastUpdated } = useQuotes();
+  const securities = useSecurities();
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
 
   return (
@@ -41,12 +43,18 @@ export function MarketView() {
       ) : (
         <>
           <SummaryStrip quotes={data} />
-          <QuotesTable quotes={data} onSelectTicker={setSelectedTicker} />
+          <QuotesTable quotes={data} securities={securities} onSelectTicker={setSelectedTicker} />
         </>
       )}
 
       {selectedTicker && (
-        <Modal title={`${selectedTicker} — Price History`} onClose={() => setSelectedTicker(null)}>
+        <Modal
+          title={(() => {
+            const sec = securities.get(selectedTicker);
+            return sec?.name ? `${selectedTicker} · ${sec.name} — Price History` : `${selectedTicker} — Price History`;
+          })()}
+          onClose={() => setSelectedTicker(null)}
+        >
           <PriceHistoryChart ticker={selectedTicker} />
         </Modal>
       )}

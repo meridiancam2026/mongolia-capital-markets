@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import type { Quote } from '../../types/api';
+import type { Quote, Security } from '../../types/api';
 import { formatChange, formatMNT, formatNumber, formatPct } from '../../utils/format';
 
 type SortKey = 'ticker' | 'last' | 'change' | 'change_pct' | 'volume' | 'value';
@@ -7,6 +7,7 @@ type SortDir = 'asc' | 'desc';
 
 interface Props {
   quotes: Quote[];
+  securities?: Map<string, Security>;
   onSelectTicker: (ticker: string) => void;
 }
 
@@ -34,7 +35,7 @@ const S = {
   surface: '#f4f7f1',
 } as const;
 
-export function QuotesTable({ quotes, onSelectTicker }: Props) {
+export function QuotesTable({ quotes, securities, onSelectTicker }: Props) {
   const [sortKey, setSortKey] = useState<SortKey>('value');
   const [sortDir, setSortDir] = useState<SortDir>('desc');
   const [flashTicker, setFlashTicker] = useState<string | null>(null);
@@ -88,7 +89,7 @@ export function QuotesTable({ quotes, onSelectTicker }: Props) {
           <thead>
             <tr>
               <th style={{ ...thStyle('ticker'), textAlign: 'left' }} onClick={() => handleSort('ticker')}>
-                TICKER{sortKey === 'ticker' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
+                TICKER / COMPANY{sortKey === 'ticker' ? (sortDir === 'asc' ? ' ↑' : ' ↓') : ''}
               </th>
               <th style={{ ...thStyle(), textAlign: 'right' }}>OPEN</th>
               <th style={{ ...thStyle(), textAlign: 'right' }}>HIGH</th>
@@ -137,7 +138,27 @@ export function QuotesTable({ quotes, onSelectTicker }: Props) {
                   onMouseLeave={() => setHoveredRow(null)}
                   style={{ cursor: 'pointer' }}
                 >
-                  <td style={{ ...tdBase, fontWeight: 600, color: S.accent, fontSize: 11 }}>{q.ticker}</td>
+                  <td style={{ ...tdBase, fontWeight: 600, color: S.accent, fontSize: 11 }}>
+                    {(() => {
+                      const sec = securities?.get(q.ticker);
+                      const tooltip = [sec?.name, sec?.sector].filter(Boolean).join(' · ');
+                      return (
+                        <div title={tooltip || undefined} style={{ display: 'flex', flexDirection: 'column', gap: 1 }}>
+                          <span>{q.ticker}</span>
+                          {sec?.name && (
+                            <span style={{ fontSize: 9, fontWeight: 400, color: S.muted, letterSpacing: '0.02em' }}>
+                              {sec.name}
+                            </span>
+                          )}
+                          {sec?.sector && (
+                            <span style={{ fontSize: 8, fontWeight: 400, color: S.faint, letterSpacing: '0.02em' }}>
+                              {sec.sector}
+                            </span>
+                          )}
+                        </div>
+                      );
+                    })()}
+                  </td>
                   <td style={{ ...tdBase, textAlign: 'right', color: S.faint, fontSize: 10 }}>{formatNumber(q.open)}</td>
                   <td style={{ ...tdBase, textAlign: 'right', color: S.faint, fontSize: 10 }}>{formatNumber(q.high)}</td>
                   <td style={{ ...tdBase, textAlign: 'right', color: S.faint, fontSize: 10 }}>{formatNumber(q.low)}</td>
