@@ -43,6 +43,21 @@ export interface OtcTrade {
   market_type: string | null;
 }
 
+export interface OtcBondRegistry {
+  id: number;
+  bond_name: string;
+  board_category: string | null;
+  sector: string | null;
+  issue_date: string | null;
+  currency: string | null;
+  maturity_months: number | null;
+  coupon_rate_raw: string | null;
+  coupon_rate: string | null;
+  underwriter: string | null;
+  status: string | null;
+  scraped_date: string;
+}
+
 export interface MacroIndicator {
   id: number;
   indicator: string;
