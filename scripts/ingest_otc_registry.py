@@ -198,8 +198,12 @@ def upsert(rows: list[dict]) -> int:
         with conn:
             with conn.cursor() as cur:
                 for row in rows:
-                    cur.execute(UPSERT_SQL, row)
-                    count += 1
+                    try:
+                        cur.execute(UPSERT_SQL, row)
+                        count += 1
+                    except Exception as e:
+                        log.error("Failed on row %r: %s", row, e)
+                        raise
     finally:
         conn.close()
     return count
