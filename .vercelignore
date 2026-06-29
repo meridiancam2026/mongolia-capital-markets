@@ -10,7 +10,7 @@ __pycache__/
 *.py
 *.sh
 *.csv
-*.html
+logs/*.html
 *.log
 *.ini
 *.cfg
