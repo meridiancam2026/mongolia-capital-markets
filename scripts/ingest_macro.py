@@ -358,6 +358,46 @@ def scrape_bom_reserves(discover: bool = False) -> list[dict]:
     return parse_bom_reserves(html)
 
 
+# ── Commodity prices (Yahoo Finance, free, no key) ────────────────────────────
+def _yahoo_price(ticker: str) -> Decimal:
+    url = f"https://query1.finance.yahoo.com/v8/finance/chart/{ticker}?range=1d&interval=1d"
+    resp = requests.get(url, headers={"User-Agent": "Mozilla/5.0"}, timeout=10)
+    resp.raise_for_status()
+    closes = resp.json()["chart"]["result"][0]["indicators"]["quote"][0]["close"]
+    price = next(p for p in reversed(closes) if p is not None)
+    return Decimal(str(price))
+
+
+def scrape_commodities() -> list[dict]:
+    """Fetch gold and copper from Yahoo Finance; coal is a static proxy."""
+    today = date.today()
+    rows = []
+
+    try:
+        gold = _yahoo_price("GC=F").quantize(Decimal("0.01"))
+        rows.append({"indicator": "COMMODITY_GOLD_USD_OZ", "value": gold,
+                     "reference_date": today, "source": "yahoo_finance"})
+        log.info("COMMODITY_GOLD_USD_OZ = %s", gold)
+    except Exception as e:
+        log.warning("Gold fetch failed: %s", e)
+
+    try:
+        copper_lb = _yahoo_price("HG=F")
+        copper_mt = (copper_lb * Decimal("2204.62")).quantize(Decimal("0.01"))
+        rows.append({"indicator": "COMMODITY_COPPER_USD_MT", "value": copper_mt,
+                     "reference_date": today, "source": "yahoo_finance"})
+        log.info("COMMODITY_COPPER_USD_MT = %s", copper_mt)
+    except Exception as e:
+        log.warning("Copper fetch failed: %s", e)
+
+    # Newcastle coal ~$110/MT at ~7.78 HKD/USD — update manually when needed
+    rows.append({"indicator": "COMMODITY_COAL_PROXY_HKD", "value": Decimal("855.00"),
+                 "reference_date": today, "source": "static_proxy"})
+    log.info("COMMODITY_COAL_PROXY_HKD = 855.00 (static proxy)")
+
+    return rows
+
+
 # ── API stubs ──────────────────────────────────────────────────────────────────
 def scrape_trading_economics() -> list[dict]:
     api_key = os.environ.get("TRADING_ECONOMICS_API_KEY", "placeholder")
@@ -470,9 +510,9 @@ def main():
     parser = argparse.ArgumentParser(description="Ingest macro indicators (FX rates, policy rate)")
     parser.add_argument(
         "--source",
-        choices=["openexchange", "bom", "te", "fluentax", "bom_inflation", "bom_reserves", "wb_macro"],
+        choices=["openexchange", "bom", "te", "fluentax", "bom_inflation", "bom_reserves", "wb_macro", "commodities"],
         default="openexchange",
-        help="Data source (default: openexchange — free, no key needed); wb_macro fetches Mongolia CPI+reserves from World Bank",
+        help="Data source (default: openexchange — free, no key needed); wb_macro fetches Mongolia CPI+reserves from World Bank; commodities fetches gold/copper from Yahoo Finance",
     )
     parser.add_argument("--discover", action="store_true",
                         help="[bom/bom_inflation/bom_reserves] Save raw HTML and exit")
@@ -492,6 +532,8 @@ def main():
         rows = scrape_bom_reserves(discover=args.discover)
     elif args.source == "wb_macro":
         rows = scrape_wb_macro()
+    elif args.source == "commodities":
+        rows = scrape_commodities()
     else:
         rows = scrape_fx_openexchange()
 
