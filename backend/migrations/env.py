@@ -19,8 +19,13 @@ if config.config_file_name is not None:
 
 # Inject DATABASE_SYNC_URL (psycopg2) into alembic config at runtime
 _db_url = os.environ.get("DATABASE_SYNC_URL") or os.environ.get("DATABASE_URL", "")
-if _db_url.startswith("postgresql+asyncpg"):
+# Normalize to psycopg2 sync driver regardless of incoming scheme
+if _db_url.startswith("postgres://"):
+    _db_url = _db_url.replace("postgres://", "postgresql+psycopg2://", 1)
+elif _db_url.startswith("postgresql+asyncpg"):
     _db_url = _db_url.replace("postgresql+asyncpg", "postgresql+psycopg2", 1)
+elif _db_url.startswith("postgresql://") and "+psycopg2" not in _db_url:
+    _db_url = _db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
 config.set_main_option("sqlalchemy.url", _db_url)
 
 target_metadata = None
