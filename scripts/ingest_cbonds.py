@@ -955,16 +955,17 @@ def main():
             log.error("No session file at %s — run --setup-session first", SESSION_FILE)
             sys.exit(1)
         full = json.loads(SESSION_FILE.read_bytes())
-        # Strip non-cbonds cookies (yandex, doubleclick, etc.) to keep the value small
+        # Keep only the four cookies that authenticate cbonds.com API calls.
+        # Filter domain to exactly cbonds.com or .cbonds.com (not .com.tr, .com.ua, etc.)
+        AUTH_COOKIES = {"CBONDSESSID", "CBONDS_TOKEN1", "CBONDS_TOKEN2", "cf_clearance"}
+        AUTH_DOMAINS = {"cbonds.com", ".cbonds.com"}
         slim = {
             "cookies": [
                 c for c in full.get("cookies", [])
-                if "cbonds.com" in c.get("domain", "")
+                if c.get("name") in AUTH_COOKIES
+                and c.get("domain") in AUTH_DOMAINS
             ],
-            "origins": [
-                o for o in full.get("origins", [])
-                if "cbonds.com" in o.get("origin", "")
-            ],
+            "origins": [],
         }
         encoded = base64.b64encode(json.dumps(slim).encode()).decode("ascii")
         print(encoded)
