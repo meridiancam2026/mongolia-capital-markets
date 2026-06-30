@@ -10,7 +10,7 @@ load_dotenv(_project_root / ".env")
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.routers import macro, otc, quotes, regulatory, securities
+from backend.routers import bonds, macro, otc, quotes, regulatory, securities
 
 app = FastAPI(title="Mongolia Capital Markets API", version="0.1.0")
 
@@ -25,6 +25,7 @@ app.add_middleware(
 app.include_router(securities.router, prefix="/api/securities", tags=["securities"])
 app.include_router(quotes.router,     prefix="/api/quotes",     tags=["quotes"])
 app.include_router(otc.router,        prefix="/api/otc",        tags=["otc"])
+app.include_router(bonds.router,      prefix="/api/bonds",      tags=["bonds"])
 app.include_router(macro.router,      prefix="/api/macro",      tags=["macro"])
 app.include_router(regulatory.router, prefix="/api/regulatory", tags=["regulatory"])
 

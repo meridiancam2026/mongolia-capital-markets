@@ -58,6 +58,19 @@ class OtcTrade(Base):
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
     market_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     currency: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
+    cbonds_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+
+
+class BondPriceHistory(Base):
+    __tablename__ = "bond_price_history"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    bond_name: Mapped[str] = mapped_column(Text, nullable=False)
+    cbonds_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    price: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    yield_: Mapped[Optional[Decimal]] = mapped_column("yield", Numeric, nullable=True)
+    currency: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
 
 
 class Macro(Base):

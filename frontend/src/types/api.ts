@@ -42,6 +42,17 @@ export interface OtcTrade {
   value: string | null;
   market_type: string | null;
   currency: string | null;
+  cbonds_id: number | null;
+}
+
+export interface BondPriceHistory {
+  id: number;
+  bond_name: string;
+  cbonds_id: number | null;
+  trade_date: string;
+  price: string | null;
+  'yield': string | null;
+  currency: string | null;
 }
 
 export interface OtcBondRegistry {

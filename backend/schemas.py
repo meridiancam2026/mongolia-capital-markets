@@ -60,8 +60,29 @@ class OtcTradeOut(BaseModel):
     value: Optional[Decimal] = None
     market_type: Optional[str] = None
     currency: Optional[str] = None
+    cbonds_id: Optional[int] = None
 
     @field_serializer("price", "value")
+    def serialize_decimal(self, v: Optional[Decimal]) -> Optional[str]:
+        return _dec(v)
+
+    @field_serializer("yield_")
+    def serialize_yield(self, v: Optional[Decimal]) -> Optional[str]:
+        return _dec(v)
+
+
+class BondPriceHistoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True, populate_by_name=True)
+
+    id: int
+    bond_name: str
+    cbonds_id: Optional[int] = None
+    trade_date: date
+    price: Optional[Decimal] = None
+    yield_: Optional[Decimal] = Field(None, alias="yield", serialization_alias="yield")
+    currency: Optional[str] = None
+
+    @field_serializer("price")
     def serialize_decimal(self, v: Optional[Decimal]) -> Optional[str]:
         return _dec(v)
 

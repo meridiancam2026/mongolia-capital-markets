@@ -4,6 +4,8 @@ import { formatMNT, formatNumber } from '../../utils/format';
 
 interface Props {
   trades: OtcTrade[];
+  onRowClick?: (trade: OtcTrade) => void;
+  selectedBondName?: string | null;
 }
 
 const S = {
@@ -18,7 +20,7 @@ const S = {
   surface: '#f4f7f1',
 } as const;
 
-export function OtcTable({ trades }: Props) {
+export function OtcTable({ trades, onRowClick, selectedBondName }: Props) {
   const [hoveredRow, setHoveredRow] = useState<number | null>(null);
 
   if (trades.length === 0) {
@@ -62,10 +64,11 @@ export function OtcTable({ trades }: Props) {
             {trades.map((t) => {
               const yld = t['yield'];
               const isHovered = hoveredRow === t.id;
+              const isSelected = selectedBondName === t.bond_name;
               const tdBase: React.CSSProperties = {
                 padding: '10px 12px',
                 borderBottom: `1px solid ${S.row}`,
-                background: isHovered ? S.hover : '#ffffff',
+                background: isSelected ? '#e8f0e4' : isHovered ? S.hover : '#ffffff',
                 transition: 'background 0.12s',
               };
               return (
@@ -73,6 +76,8 @@ export function OtcTable({ trades }: Props) {
                   key={t.id}
                   onMouseEnter={() => setHoveredRow(t.id)}
                   onMouseLeave={() => setHoveredRow(null)}
+                  onClick={() => onRowClick?.(t)}
+                  style={{ cursor: onRowClick ? 'pointer' : 'default' }}
                 >
                   <td style={{ ...tdBase }}>
                     <div style={{ fontWeight: 600, color: S.text, fontFamily: "'Inter Tight', sans-serif", fontSize: 12 }}>

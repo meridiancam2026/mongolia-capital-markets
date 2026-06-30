@@ -59,15 +59,25 @@ MONGOLIA_BOND_URLS = [
 ]
 
 UPSERT_SQL = """
-INSERT INTO otc_trades (bond_name, price, yield, volume, value, trade_date, market_type, currency)
-VALUES (%(bond_name)s, %(price)s, %(yield)s, %(volume)s, %(value)s, %(trade_date)s, %(market_type)s, %(currency)s)
+INSERT INTO otc_trades (bond_name, price, yield, volume, value, trade_date, market_type, currency, cbonds_id)
+VALUES (%(bond_name)s, %(price)s, %(yield)s, %(volume)s, %(value)s, %(trade_date)s, %(market_type)s, %(currency)s, %(cbonds_id)s)
 ON CONFLICT (bond_name, trade_date) DO UPDATE SET
     price       = EXCLUDED.price,
     yield       = EXCLUDED.yield,
     volume      = EXCLUDED.volume,
     value       = EXCLUDED.value,
     market_type = EXCLUDED.market_type,
-    currency    = EXCLUDED.currency
+    currency    = EXCLUDED.currency,
+    cbonds_id   = EXCLUDED.cbonds_id
+"""
+
+HISTORY_UPSERT_SQL = """
+INSERT INTO bond_price_history (bond_name, cbonds_id, trade_date, price, yield, currency)
+VALUES (%(bond_name)s, %(cbonds_id)s, %(trade_date)s, %(price)s, %(yield)s, %(currency)s)
+ON CONFLICT (bond_name, trade_date) DO UPDATE SET
+    price    = EXCLUDED.price,
+    yield    = EXCLUDED.yield,
+    cbonds_id = COALESCE(EXCLUDED.cbonds_id, bond_price_history.cbonds_id)
 """
 
 
@@ -515,6 +525,185 @@ def upsert(rows: list[dict]) -> int:
     return count
 
 
+def fetch_history_via_api(bonds_meta: list[dict], days: int = 90) -> list[dict]:
+    """
+    Fetch 90-day price + yield history for a list of bonds via POST /api/chart/get_tradings/.
+    bonds_meta: rows from fetch_all_bonds_via_api() (needs cbonds_id, tg_id, currency, bond_name).
+    Skips bonds whose history is already up to date. Returns rows for bond_price_history upsert.
+    """
+    import urllib.request
+    import urllib.error
+    from datetime import timedelta
+
+    if not SESSION_FILE.exists():
+        log.warning("No session file — run --setup-session first")
+        return []
+
+    with open(SESSION_FILE) as f:
+        storage = json.load(f)
+
+    cookie_header = "; ".join(
+        f"{c['name']}={c['value']}"
+        for c in storage.get("cookies", [])
+        if "cbonds.com" in c.get("domain", "")
+    )
+
+    # Load latest dates already in DB to avoid re-fetching existing data
+    conn = get_db_conn()
+    latest_dates: dict[str, date] = {}
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT bond_name, MAX(trade_date) FROM bond_price_history GROUP BY bond_name")
+            for row in cur.fetchall():
+                latest_dates[row[0]] = row[1]
+    except Exception:
+        pass
+    finally:
+        conn.close()
+
+    today = date.today()
+    default_start = today - timedelta(days=days)
+
+    HISTORY_URL = "https://cbonds.com/api/chart/get_tradings/"
+    BATCH = 20
+    all_rows: list[dict] = []
+    first_call = True
+
+    for batch_start in range(0, len(bonds_meta), BATCH):
+        batch = bonds_meta[batch_start:batch_start + BATCH]
+
+        # Determine the earliest start date needed across this batch
+        starts = []
+        for b in batch:
+            last = latest_dates.get(b["bond_name"])
+            starts.append(last + timedelta(days=1) if last else default_start)
+        start_date = min(starts)
+
+        if start_date > today:
+            log.debug("History batch %d already up to date", batch_start)
+            continue
+
+        items = [
+            {"id": b["cbonds_id"], "tgId": b.get("tg_id", 77), "model": "bonds"}
+            for b in batch
+        ]
+        id_to_meta = {str(b["cbonds_id"]): b for b in batch}
+
+        # Fetch price series then yield series
+        price_series: dict[str, list] = {}
+        yield_series: dict[str, list] = {}
+
+        for chart_type in ("price", "yield"):
+            body = {
+                "items": items,
+                "startDate": start_date.strftime("%Y-%m-%d"),
+                "endDate": today.strftime("%Y-%m-%d"),
+                "chartType": chart_type,
+                "userChangePeriod": False,
+                "getChartIteration": 1,
+            }
+            payload = json.dumps(body).encode("utf-8")
+            req = urllib.request.Request(
+                HISTORY_URL,
+                data=payload,
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "application/json, */*",
+                    "Cookie": cookie_header,
+                    "Origin": "https://cbonds.com",
+                    "Referer": "https://cbonds.com/bonds/",
+                    "User-Agent": (
+                        "Mozilla/5.0 (X11; Linux x86_64) "
+                        "AppleWebKit/537.36 (KHTML, like Gecko) "
+                        "Chrome/125.0.0.0 Safari/537.36"
+                    ),
+                },
+                method="POST",
+            )
+            try:
+                with urllib.request.urlopen(req, timeout=30) as resp:
+                    data = json.loads(resp.read())
+            except Exception as e:
+                log.error("History API error (chart_type=%s): %s", chart_type, e)
+                continue
+
+            if first_call:
+                inner = data.get("response") or {}
+                sub = inner.get("data") if isinstance(inner, dict) else inner
+                if isinstance(sub, dict):
+                    first_key = next(iter(sub), None)
+                    if first_key:
+                        log.info("History format — key=%r, sample=%s",
+                                 first_key, str(sub[first_key])[:200])
+                first_call = False
+
+            inner = data.get("response") or data
+            chart_data = (inner.get("data") if isinstance(inner, dict) else None) or {}
+            if not isinstance(chart_data, dict):
+                continue
+
+            target = price_series if chart_type == "price" else yield_series
+            for key, series in chart_data.items():
+                bond_id_str = re.split(r'[:\-_]', str(key))[0]
+                if isinstance(series, list):
+                    target[bond_id_str] = series
+
+        merged: dict[tuple, dict] = {}
+        for chart_type, series_map in (("price", price_series), ("yield", yield_series)):
+            for bond_id_str, series in series_map.items():
+                meta = id_to_meta.get(bond_id_str)
+                if not meta:
+                    continue
+                for point in series:
+                    if not isinstance(point, (list, tuple)) or len(point) < 2:
+                        continue
+                    ts, val = point[0], point[1]
+                    if val is None:
+                        continue
+                    try:
+                        ts_s = ts / 1000 if ts > 1e10 else ts
+                        trade_dt = date.fromtimestamp(ts_s)
+                    except Exception:
+                        continue
+                    key = (meta["bond_name"], trade_dt)
+                    if key not in merged:
+                        merged[key] = {
+                            "bond_name": meta["bond_name"],
+                            "cbonds_id": meta["cbonds_id"],
+                            "trade_date": trade_dt,
+                            "price":     None,
+                            "yield":     None,
+                            "currency":  meta.get("currency"),
+                        }
+                    if chart_type == "price":
+                        merged[key]["price"] = _dec(val)
+                    else:
+                        # Yield from chart API is a decimal ratio (0.0695 = 6.95%)
+                        merged[key]["yield"] = _dec(val * 100 if val < 1 else val)
+
+        all_rows.extend(merged.values())
+        log.info("History batch %d/%d: %d rows", batch_start + BATCH, len(bonds_meta), len(merged))
+
+    log.info("Total history rows prepared: %d", len(all_rows))
+    return all_rows
+
+
+def upsert_history(rows: list[dict]) -> int:
+    if not rows:
+        return 0
+    conn = get_db_conn()
+    count = 0
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                for row in rows:
+                    cur.execute(HISTORY_UPSERT_SQL, row)
+                    count += 1
+    finally:
+        conn.close()
+    return count
+
+
 def fetch_all_bonds_via_api() -> list[dict]:
     """
     POST https://cbonds.com/api/bonds/search/ using saved session cookies.
@@ -649,6 +838,13 @@ def fetch_all_bonds_via_api() -> list[dict]:
         yield_raw = yield_num * 100 if yield_num is not None else bond.get("tradings_yield_effect")
         currency = bond.get("currency_name") or _parse_currency(name)
 
+        cbonds_id = bond.get("id.numeric")
+
+        # Parse trading ground ID from "(0,77,0)" format for history fetch
+        tg_raw = bond.get("ss_current_trading_grounds", "")
+        tg_ids = [int(x) for x in re.findall(r'\d+', tg_raw) if x != '0']
+        tg_id = tg_ids[0] if tg_ids else 77
+
         rows.append({
             "bond_name":   name,
             "price":       _dec(price_raw),
@@ -658,6 +854,9 @@ def fetch_all_bonds_via_api() -> list[dict]:
             "trade_date":  today,
             "market_type": "cbonds",
             "currency":    currency,
+            "cbonds_id":   cbonds_id,
+            # tg_id is not stored in DB but kept for history fetch (psycopg2 ignores extra keys)
+            "tg_id":       tg_id,
         })
 
     log.info("Parsed %d unique bond rows from API", len(rows))
@@ -714,8 +913,12 @@ def main():
                         help="Login then screenshot bond listing page and exit")
     parser.add_argument("--discover-xhr", action="store_true",
                         help="Intercept all XHR/fetch requests while bond page loads")
+    parser.add_argument("--discover-bond-history", action="store_true",
+                        help="Navigate to a bond detail page and capture all API calls (finds history endpoint)")
     parser.add_argument("--dry-run", action="store_true",
                         help="Parse and print rows but do not write to DB")
+    parser.add_argument("--skip-history", action="store_true",
+                        help="Skip fetching 90-day price/yield history for eurobonds")
     args = parser.parse_args()
 
     try:
@@ -903,6 +1106,65 @@ def main():
             browser.close()
             sys.exit(0)
 
+        # ── Discover bond price history endpoint ────────────────────────
+        if args.discover_bond_history:
+            # Use Golomt Bank 11% 20may2027 USD (cbonds ID 1789811) — has live prices
+            BOND_DETAIL_URL = "https://cbonds.com/bonds/1789811/"
+            captures: list[dict] = []
+
+            def _hist_request(req):
+                if "cbonds.com/api/" in req.url:
+                    try:
+                        post_data = req.post_data
+                    except Exception:
+                        post_data = None
+                    captures.append({
+                        "type": "request",
+                        "method": req.method,
+                        "url": req.url,
+                        "post_data": post_data,
+                    })
+
+            page.on("request", _hist_request)
+
+            log.info("Loading bond detail page: %s", BOND_DETAIL_URL)
+            page.goto(BOND_DETAIL_URL, wait_until="domcontentloaded", timeout=30_000)
+            page.wait_for_timeout(4_000)
+
+            # Scroll to trigger lazy-loaded chart/history sections
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(3_000)
+
+            # Click any tabs or buttons that might load price history
+            for selector in [
+                'button:has-text("Quotes")', 'a:has-text("Quotes")',
+                'button:has-text("Price")', 'a:has-text("Price")',
+                'button:has-text("History")', 'a:has-text("History")',
+                '[class*="tab"]:has-text("quote")', '[class*="tab"]:has-text("price")',
+                '[data-tab*="quote"]', '[data-tab*="price"]',
+            ]:
+                try:
+                    el = page.locator(selector).first
+                    if el.is_visible(timeout=500):
+                        log.info("Clicking: %s", selector)
+                        el.click()
+                        page.wait_for_timeout(2_000)
+                        break
+                except Exception:
+                    pass
+
+            page.wait_for_timeout(3_000)
+
+            print(f"\n=== API calls on bond detail page ({BOND_DETAIL_URL}) ===")
+            for c in captures:
+                if c["type"] == "request":
+                    print(f"\n  {c['method']} {c['url']}")
+                    if c.get("post_data"):
+                        print(f"    body: {c['post_data'][:400]}")
+
+            browser.close()
+            sys.exit(0)
+
         # ── Discover XHR endpoints ───────────────────────────────────────
         if args.discover_xhr:
             api_captures: list[dict] = []
@@ -1001,7 +1263,19 @@ def main():
         return
 
     n = upsert(rows)
-    log.info("Done — %d bond rows upserted into otc_trades (market_type=cbonds)", n)
+    log.info("Upserted %d bond rows into otc_trades", n)
+
+    if not args.skip_history:
+        eurobonds = [
+            r for r in rows
+            if r.get("currency") and r.get("currency") != "MNT" and r.get("cbonds_id")
+        ]
+        log.info("Fetching 90-day price/yield history for %d eurobonds…", len(eurobonds))
+        hist_rows = fetch_history_via_api(eurobonds)
+        hn = upsert_history(hist_rows)
+        log.info("Done — %d history rows upserted into bond_price_history", hn)
+    else:
+        log.info("--skip-history set — skipping history fetch")
 
 
 if __name__ == "__main__":
