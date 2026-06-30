@@ -7,3 +7,5 @@ alembic==1.18.4
 python-dotenv==1.2.2
 pydantic==2.13.4
 httpx==0.28.1
+playwright==1.52.0
+beautifulsoup4==4.13.4
