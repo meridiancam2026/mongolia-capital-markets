@@ -24,7 +24,7 @@ async def list_otc(
     elif segment == "eurobond":
         stmt = stmt.where(OtcTrade.currency != "MNT")
 
-    stmt = stmt.order_by(OtcTrade.value.desc().nulls_last())
+    stmt = stmt.order_by(OtcTrade.price.is_(None), OtcTrade.value.desc().nulls_last())
     result = await db.execute(stmt)
     return result.scalars().all()
 
