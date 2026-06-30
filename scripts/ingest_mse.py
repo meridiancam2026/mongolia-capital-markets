@@ -109,12 +109,19 @@ def parse_row(cells: list[str]) -> dict | None:
 
 # ── scraper ────────────────────────────────────────────────────────────────────
 def scrape_quotes(discover: bool = False) -> list[dict]:
-    chromium_path = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", "/snap/bin/chromium")
+    chromium_path = os.environ.get("PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH", "")
     rows: list[dict] = []
     dump_path = _project_root / "logs" / "mse_page_dump.html"
 
+    launch_kwargs: dict = {
+        "headless": True,
+        "args": ["--no-sandbox", "--disable-dev-shm-usage"],
+    }
+    if chromium_path:
+        launch_kwargs["executable_path"] = chromium_path
+
     with sync_playwright() as p:
-        browser = p.chromium.launch(executable_path=chromium_path, headless=True)
+        browser = p.chromium.launch(**launch_kwargs)
         page = browser.new_page()
 
         # In discover mode: navigate and wait for network to settle, then dump
