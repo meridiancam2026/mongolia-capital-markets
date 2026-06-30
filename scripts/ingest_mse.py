@@ -23,12 +23,14 @@ _project_root = Path(__file__).resolve().parent.parent
 load_dotenv(_project_root / ".env")
 
 LOG_LEVEL = os.environ.get("LOG_LEVEL", "INFO").upper()
+_logs_dir = _project_root / "logs"
+_logs_dir.mkdir(exist_ok=True)
 logging.basicConfig(
     level=LOG_LEVEL,
     format="%(asctime)s %(levelname)s %(message)s",
     handlers=[
         logging.StreamHandler(),
-        logging.FileHandler(_project_root / "logs" / "ingest_mse.log"),
+        logging.FileHandler(_logs_dir / "ingest_mse.log"),
     ],
 )
 log = logging.getLogger(__name__)
