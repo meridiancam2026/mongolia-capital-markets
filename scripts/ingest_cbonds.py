@@ -928,6 +928,7 @@ def setup_session(playwright):
 
 
 def main():
+    global SESSION_FILE
     parser = argparse.ArgumentParser(description="Cbonds Playwright scraper for Mongolia bonds")
     parser.add_argument("--setup-session", action="store_true",
                         help="Open visible browser so you can log in + complete 2FA, then save cookies")
@@ -968,7 +969,6 @@ def main():
     )
 
     if not needs_browser:
-        global SESSION_FILE
         # Prefer CBONDS_SESSION_B64 env var (used on Render) over local file
         session_b64 = os.environ.get("CBONDS_SESSION_B64", "")
         if session_b64:
