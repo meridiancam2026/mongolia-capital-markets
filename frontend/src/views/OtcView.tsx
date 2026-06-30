@@ -34,8 +34,8 @@ export function OtcView() {
       {/* Top-5 most active bonds (today's leaderboard) */}
       <div>
         <SectionHeader
-          title="OTC BOND MARKET · TODAY'S MOST ACTIVE"
-          sub="Top bonds by aggregate trade value · MASD M-OTC"
+          title="OTC BOND MARKET · INDICATIVE PRICES"
+          sub="Live indicative prices &amp; yields · Sources: Cbonds, MASD M-OTC"
         />
         {leaderboard.error && <ErrorBanner message={leaderboard.error} />}
         {leaderboard.loading ? <Spinner /> : <OtcTable trades={leaderboard.data} />}
