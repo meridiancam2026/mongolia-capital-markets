@@ -1,7 +1,10 @@
 import asyncio
+import logging
 import sys
 from pathlib import Path
 from typing import Annotated, Optional
+
+log = logging.getLogger(__name__)
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy import select, text
@@ -43,10 +46,14 @@ async def refresh_quotes():
             stderr=asyncio.subprocess.PIPE,
             cwd=str(_PROJECT_ROOT),
         )
-        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+        stdout, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+        stdout_txt = stdout.decode("utf-8", errors="replace") if stdout else ""
+        stderr_txt = stderr.decode("utf-8", errors="replace") if stderr else ""
+        log.info("MSE scraper stdout: %s", stdout_txt[-1000:])
+        if stderr_txt:
+            log.warning("MSE scraper stderr: %s", stderr_txt[-1000:])
         if proc.returncode != 0:
-            detail = stderr.decode("utf-8", errors="replace")[-500:] if stderr else "unknown error"
-            raise HTTPException(status_code=503, detail=f"Scraper failed: {detail}")
+            raise HTTPException(status_code=503, detail=stderr_txt[-800:] or stdout_txt[-800:] or "Scraper exited non-zero")
     except asyncio.TimeoutError:
         raise HTTPException(status_code=504, detail="Scraper timed out after 60s")
     return {"status": "ok"}

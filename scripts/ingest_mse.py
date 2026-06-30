@@ -165,9 +165,15 @@ def scrape_quotes(discover: bool = False) -> list[dict]:
 
 # ── database ───────────────────────────────────────────────────────────────────
 def get_db_conn():
-    url = os.environ.get("DATABASE_SYNC_URL", "")
-    if url.startswith("postgresql+psycopg2://"):
-        url = url.replace("postgresql+psycopg2://", "postgresql://", 1)
+    url = os.environ.get("DATABASE_SYNC_URL") or os.environ.get("DATABASE_URL", "")
+    for old, new in [
+        ("postgresql+asyncpg://", "postgresql://"),
+        ("postgresql+psycopg2://", "postgresql://"),
+        ("postgres://", "postgresql://"),
+    ]:
+        if url.startswith(old):
+            url = url.replace(old, new, 1)
+            break
     return psycopg2.connect(url)
 
 
