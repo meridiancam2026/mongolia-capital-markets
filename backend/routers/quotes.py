@@ -1,3 +1,6 @@
+import asyncio
+import sys
+from pathlib import Path
 from typing import Annotated, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -5,8 +8,8 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from backend.database import get_db
-from backend.models import Quote, Security
-from backend.schemas import QuoteOut
+from backend.models import EquityPriceHistory, Quote, Security
+from backend.schemas import EquityHistoryOut, QuoteOut
 
 router = APIRouter()
 
@@ -19,6 +22,8 @@ _LATEST_SQL = text("""
     ORDER BY ticker, trade_time DESC
 """)
 
+_PROJECT_ROOT = Path(__file__).resolve().parents[2]
+
 
 @router.get("", response_model=list[QuoteOut])
 async def list_latest_quotes(db: Annotated[AsyncSession, Depends(get_db)]):
@@ -27,13 +32,50 @@ async def list_latest_quotes(db: Annotated[AsyncSession, Depends(get_db)]):
     return [QuoteOut.model_validate(dict(r)) for r in rows]
 
 
+@router.post("/refresh", status_code=200)
+async def refresh_quotes():
+    """Trigger an MSE scrape and return when complete (max 60s)."""
+    script = _PROJECT_ROOT / "scripts" / "ingest_mse.py"
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            sys.executable, str(script),
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+            cwd=str(_PROJECT_ROOT),
+        )
+        _, stderr = await asyncio.wait_for(proc.communicate(), timeout=60)
+        if proc.returncode != 0:
+            detail = stderr.decode("utf-8", errors="replace")[-500:] if stderr else "unknown error"
+            raise HTTPException(status_code=503, detail=f"Scraper failed: {detail}")
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=504, detail="Scraper timed out after 60s")
+    return {"status": "ok"}
+
+
+@router.get("/{ticker}/history", response_model=list[EquityHistoryOut])
+async def get_equity_history(
+    ticker: str,
+    db: Annotated[AsyncSession, Depends(get_db)],
+):
+    sec = await db.get(Security, ticker.upper())
+    if sec is None:
+        raise HTTPException(status_code=404, detail=f"Ticker {ticker.upper()!r} not found")
+
+    stmt = (
+        select(EquityPriceHistory)
+        .where(EquityPriceHistory.ticker == ticker.upper())
+        .order_by(EquityPriceHistory.trade_date.asc())
+    )
+    result = await db.execute(stmt)
+    return result.scalars().all()
+
+
 @router.get("/{ticker}", response_model=list[QuoteOut])
 async def get_ticker_quotes(
     ticker: str,
     db: Annotated[AsyncSession, Depends(get_db)],
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ):
-    # Verify ticker exists
     sec = await db.get(Security, ticker.upper())
     if sec is None:
         raise HTTPException(status_code=404, detail=f"Ticker {ticker.upper()!r} not found")

@@ -193,6 +193,23 @@ INSERT INTO securities (ticker) VALUES (%s)
 ON CONFLICT (ticker) DO NOTHING
 """
 
+HISTORY_UPSERT_SQL = """
+INSERT INTO equity_price_history
+    (ticker, trade_date, open, high, low, close, change, change_pct, volume, value)
+VALUES
+    (%(ticker)s, %(trade_date)s, %(open)s, %(high)s, %(low)s, %(close)s,
+     %(change)s, %(change_pct)s, %(volume)s, %(value)s)
+ON CONFLICT (ticker, trade_date) DO UPDATE SET
+    open       = COALESCE(EXCLUDED.open,       equity_price_history.open),
+    high       = COALESCE(EXCLUDED.high,       equity_price_history.high),
+    low        = COALESCE(EXCLUDED.low,        equity_price_history.low),
+    close      = COALESCE(EXCLUDED.close,      equity_price_history.close),
+    change     = COALESCE(EXCLUDED.change,     equity_price_history.change),
+    change_pct = COALESCE(EXCLUDED.change_pct, equity_price_history.change_pct),
+    volume     = COALESCE(EXCLUDED.volume,     equity_price_history.volume),
+    value      = COALESCE(EXCLUDED.value,      equity_price_history.value)
+"""
+
 
 def upsert_quotes(rows: list[dict]) -> int:
     if not rows:
@@ -209,6 +226,43 @@ def upsert_quotes(rows: list[dict]) -> int:
     finally:
         conn.close()
     return inserted
+
+
+def upsert_equity_history(rows: list[dict]) -> int:
+    """Snapshot today's close prices into equity_price_history (one row per ticker per day)."""
+    from datetime import date as date_type
+    if not rows:
+        return 0
+    today = date_type.today()
+    history_rows = [
+        {
+            "ticker":     r["ticker"],
+            "trade_date": today,
+            "open":       r.get("open"),
+            "high":       r.get("high"),
+            "low":        r.get("low"),
+            "close":      r.get("close") or r.get("last"),
+            "change":     r.get("change"),
+            "change_pct": r.get("change_pct"),
+            "volume":     r.get("volume"),
+            "value":      r.get("value"),
+        }
+        for r in rows
+        if r.get("close") is not None or r.get("last") is not None
+    ]
+    if not history_rows:
+        return 0
+    conn = get_db_conn()
+    count = 0
+    try:
+        with conn:
+            with conn.cursor() as cur:
+                for row in history_rows:
+                    cur.execute(HISTORY_UPSERT_SQL, row)
+                    count += 1
+    finally:
+        conn.close()
+    return count
 
 
 # ── main ───────────────────────────────────────────────────────────────────────
@@ -230,6 +284,9 @@ def main():
 
     inserted = upsert_quotes(rows)
     log.info("Upserted %d rows into quotes table", inserted)
+
+    hn = upsert_equity_history(rows)
+    log.info("Snapshotted %d rows into equity_price_history", hn)
 
 
 if __name__ == "__main__":

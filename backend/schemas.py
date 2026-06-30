@@ -91,6 +91,26 @@ class BondPriceHistoryOut(BaseModel):
         return _dec(v)
 
 
+class EquityHistoryOut(BaseModel):
+    model_config = ConfigDict(from_attributes=True)
+
+    id: int
+    ticker: str
+    trade_date: date
+    open: Optional[Decimal] = None
+    high: Optional[Decimal] = None
+    low: Optional[Decimal] = None
+    close: Optional[Decimal] = None
+    change: Optional[Decimal] = None
+    change_pct: Optional[Decimal] = None
+    volume: Optional[int] = None
+    value: Optional[Decimal] = None
+
+    @field_serializer("open", "high", "low", "close", "change", "change_pct", "value")
+    def serialize_decimal(self, v: Optional[Decimal]) -> Optional[str]:
+        return _dec(v)
+
+
 class MacroOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 

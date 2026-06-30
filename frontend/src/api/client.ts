@@ -7,10 +7,17 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiFetch<T>(path: string): Promise<T> {
-  const res = await fetch(`${BASE}${path}`);
+export async function apiFetch<T>(path: string, init?: RequestInit): Promise<T> {
+  const res = await fetch(`${BASE}${path}`, init);
   if (!res.ok) {
     throw new ApiError(res.status, `${res.status} ${res.statusText}`);
   }
   return res.json() as Promise<T>;
+}
+
+export async function apiPost(path: string): Promise<void> {
+  const res = await fetch(`${BASE}${path}`, { method: 'POST' });
+  if (!res.ok) {
+    throw new ApiError(res.status, `${res.status} ${res.statusText}`);
+  }
 }

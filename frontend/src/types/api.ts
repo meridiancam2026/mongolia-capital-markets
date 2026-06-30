@@ -31,6 +31,20 @@ export interface Quote {
   ask_qty: number | null;
 }
 
+export interface EquityHistory {
+  id: number;
+  ticker: string;
+  trade_date: string;
+  open: string | null;
+  high: string | null;
+  low: string | null;
+  close: string | null;
+  change: string | null;
+  change_pct: string | null;
+  volume: number | null;
+  value: string | null;
+}
+
 export interface OtcTrade {
   id: number;
   bond_name: string;

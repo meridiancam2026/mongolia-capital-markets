@@ -61,6 +61,22 @@ class OtcTrade(Base):
     cbonds_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
 
 
+class EquityPriceHistory(Base):
+    __tablename__ = "equity_price_history"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True)
+    ticker: Mapped[str] = mapped_column(String(10), nullable=False)
+    trade_date: Mapped[date] = mapped_column(Date, nullable=False)
+    open: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    high: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    low: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    close: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    change: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    change_pct: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+    volume: Mapped[Optional[int]] = mapped_column(BigInteger, nullable=True)
+    value: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
+
+
 class BondPriceHistory(Base):
     __tablename__ = "bond_price_history"
 

@@ -8,8 +8,15 @@ import { ErrorBanner } from '../components/ui/ErrorBanner';
 import { useQuotes } from '../hooks/useQuotes';
 import { useSecurities } from '../hooks/useSecurities';
 
+const S = {
+  faint:   '#8a977c',
+  border:  '#d3dcc6',
+  surface: '#f4f7f1',
+  muted:   '#5d6a52',
+} as const;
+
 export function MarketView() {
-  const { data, loading, error, lastUpdated } = useQuotes();
+  const { data, loading, refreshing, error, lastUpdated, refresh } = useQuotes();
   const securities = useSecurities();
   const [selectedTicker, setSelectedTicker] = useState<string | null>(null);
 
@@ -18,22 +25,44 @@ export function MarketView() {
       {/* Section header */}
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 14 }}>
         <div>
-          <div style={{ fontSize: 10, fontWeight: 600, color: '#8a977c', letterSpacing: '0.1em' }}>
+          <div style={{ fontSize: 10, fontWeight: 600, color: S.faint, letterSpacing: '0.1em' }}>
             MSE EQUITIES
           </div>
-          <div style={{ fontSize: 9, color: '#8a977c', marginTop: 2, letterSpacing: '0.04em' }}>
+          <div style={{ fontSize: 9, color: S.faint, marginTop: 2, letterSpacing: '0.04em' }}>
             Mongolian Stock Exchange · click a row for price history
           </div>
         </div>
-        {lastUpdated && (
-          <span style={{
-            fontSize: 9, color: '#8a977c', letterSpacing: '0.05em',
-            border: '1px solid #d3dcc6', padding: '3px 8px',
-            background: '#f4f7f1',
-          }}>
-            {lastUpdated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · 60s
-          </span>
-        )}
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          {lastUpdated && (
+            <span style={{
+              fontSize: 9, color: S.faint, letterSpacing: '0.05em',
+              border: `1px solid ${S.border}`, padding: '3px 8px',
+              background: S.surface,
+            }}>
+              {lastUpdated.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', second: '2-digit' })} · 60s
+            </span>
+          )}
+          <button
+            onClick={refresh}
+            disabled={refreshing}
+            title="Re-scrape MSE and refresh quotes"
+            style={{
+              fontSize: 9,
+              letterSpacing: '0.08em',
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontWeight: 600,
+              color: refreshing ? S.faint : S.muted,
+              background: S.surface,
+              border: `1px solid ${S.border}`,
+              padding: '3px 10px',
+              cursor: refreshing ? 'not-allowed' : 'pointer',
+              opacity: refreshing ? 0.6 : 1,
+            }}
+          >
+            {refreshing ? 'REFRESHING…' : '↺ REFRESH'}
+          </button>
+        </div>
       </div>
 
       {error && <ErrorBanner message={error} />}
