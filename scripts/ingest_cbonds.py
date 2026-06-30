@@ -954,7 +954,19 @@ def main():
         if not SESSION_FILE.exists():
             log.error("No session file at %s — run --setup-session first", SESSION_FILE)
             sys.exit(1)
-        encoded = base64.b64encode(SESSION_FILE.read_bytes()).decode("ascii")
+        full = json.loads(SESSION_FILE.read_bytes())
+        # Strip non-cbonds cookies (yandex, doubleclick, etc.) to keep the value small
+        slim = {
+            "cookies": [
+                c for c in full.get("cookies", [])
+                if "cbonds.com" in c.get("domain", "")
+            ],
+            "origins": [
+                o for o in full.get("origins", [])
+                if "cbonds.com" in o.get("origin", "")
+            ],
+        }
+        encoded = base64.b64encode(json.dumps(slim).encode()).decode("ascii")
         print(encoded)
         return
 
