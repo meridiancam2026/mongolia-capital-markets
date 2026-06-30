@@ -641,15 +641,13 @@ def fetch_all_bonds_via_api() -> list[dict]:
         name = name[:200]
 
         price_raw = (
-            bond.get("indicative_price")
-            or bond.get("last_price")
-            or bond.get("marketprice")
+            bond.get("tradings_indicative_price.numeric")
+            or bond.get("tradings_indicative_price")
         )
-        yield_raw = (
-            bond.get("indicative_yield")
-            or bond.get("ytm_offer")
-            or bond.get("ytm_bid")
-        )
+        # tradings_yield_effect.numeric is a decimal ratio (e.g. 0.0695 = 6.95%)
+        yield_num = bond.get("tradings_yield_effect.numeric")
+        yield_raw = yield_num * 100 if yield_num is not None else bond.get("tradings_yield_effect")
+        currency = bond.get("currency_name") or _parse_currency(name)
 
         rows.append({
             "bond_name":   name,
@@ -659,7 +657,7 @@ def fetch_all_bonds_via_api() -> list[dict]:
             "value":       None,
             "trade_date":  today,
             "market_type": "cbonds",
-            "currency":    _parse_currency(name),
+            "currency":    currency,
         })
 
     log.info("Parsed %d unique bond rows from API", len(rows))
