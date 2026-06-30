@@ -942,14 +942,20 @@ def main():
     parser.add_argument("--dry-run", action="store_true",
                         help="Parse and print rows but do not write to DB")
     parser.add_argument("--skip-history", action="store_true",
-                        help="Skip fetching 90-day price/yield history for eurobonds")
+                        help="Skip daily price/yield snapshot into bond_price_history")
+    parser.add_argument("--print-session-b64", action="store_true",
+                        help="Print the session file as base64 (for CBONDS_SESSION_B64 env var)")
     args = parser.parse_args()
 
-    try:
-        from playwright.sync_api import sync_playwright
-    except ImportError:
-        log.error("playwright not installed. Run: pip install playwright")
-        sys.exit(1)
+    # ── Print session as base64 (one-time setup for Render env var) ──────────
+    if args.print_session_b64:
+        import base64
+        if not SESSION_FILE.exists():
+            log.error("No session file at %s — run --setup-session first", SESSION_FILE)
+            sys.exit(1)
+        encoded = base64.b64encode(SESSION_FILE.read_bytes()).decode("ascii")
+        print(encoded)
+        return
 
     # ── Normal ingest — no browser needed when session file exists ─────────
     # All discover/setup flags require Playwright; the ingest path uses urllib directly.
@@ -962,9 +968,21 @@ def main():
     )
 
     if not needs_browser:
-        if not SESSION_FILE.exists():
+        global SESSION_FILE
+        # Prefer CBONDS_SESSION_B64 env var (used on Render) over local file
+        session_b64 = os.environ.get("CBONDS_SESSION_B64", "")
+        if session_b64:
+            import base64, tempfile
+            tmp = tempfile.NamedTemporaryFile(
+                suffix=".json", delete=False, dir=LOGS_DIR
+            )
+            tmp.write(base64.b64decode(session_b64))
+            tmp.close()
+            SESSION_FILE = Path(tmp.name)
+            log.info("Loaded session from CBONDS_SESSION_B64 env var → %s", tmp.name)
+        elif not SESSION_FILE.exists():
             log.error(
-                "No saved session found. "
+                "No saved session found and CBONDS_SESSION_B64 not set. "
                 "Run:  python scripts/ingest_cbonds.py --setup-session"
             )
             sys.exit(1)
@@ -1009,6 +1027,12 @@ def main():
         return
 
     # ── Browser-required paths (setup/discover) ────────────────────────────
+    try:
+        from playwright.sync_api import sync_playwright
+    except ImportError:
+        log.error("playwright not installed — run: pip install playwright")
+        sys.exit(1)
+
     with sync_playwright() as p:
         if args.setup_session:
             setup_session(p)
