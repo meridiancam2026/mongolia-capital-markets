@@ -584,10 +584,12 @@ def fetch_history_via_api(bonds_meta: list[dict], days: int = 90) -> list[dict]:
             continue
 
         items = [
-            {"id": b["cbonds_id"], "tgId": b.get("tg_id", 77), "model": "bonds"}
+            {"id": int(b["cbonds_id"]), "tgId": int(b.get("tg_id", 77)), "model": "bonds"}
             for b in batch
         ]
-        id_to_meta = {str(b["cbonds_id"]): b for b in batch}
+        id_to_meta = {str(int(b["cbonds_id"])): b for b in batch}
+        if batch_start == 0:
+            log.info("History request sample items: %s", items[:3])
 
         # Fetch price series then yield series
         price_series: dict[str, list] = {}
@@ -603,15 +605,18 @@ def fetch_history_via_api(bonds_meta: list[dict], days: int = 90) -> list[dict]:
                 "getChartIteration": 1,
             }
             payload = json.dumps(body).encode("utf-8")
+            # Use the first bond's detail page as Referer — Cbonds checks this
+            first_id = items[0]["id"]
             req = urllib.request.Request(
                 HISTORY_URL,
                 data=payload,
                 headers={
                     "Content-Type": "application/json",
-                    "Accept": "application/json, */*",
+                    "Accept": "application/json, text/plain, */*",
+                    "X-Requested-With": "XMLHttpRequest",
                     "Cookie": cookie_header,
                     "Origin": "https://cbonds.com",
-                    "Referer": "https://cbonds.com/bonds/",
+                    "Referer": f"https://cbonds.com/bonds/{first_id}/",
                     "User-Agent": (
                         "Mozilla/5.0 (X11; Linux x86_64) "
                         "AppleWebKit/537.36 (KHTML, like Gecko) "
@@ -628,18 +633,36 @@ def fetch_history_via_api(bonds_meta: list[dict], days: int = 90) -> list[dict]:
                 continue
 
             if first_call:
-                inner = data.get("response") or {}
-                sub = inner.get("data") if isinstance(inner, dict) else inner
-                if isinstance(sub, dict):
-                    first_key = next(iter(sub), None)
-                    if first_key:
-                        log.info("History format — key=%r, sample=%s",
-                                 first_key, str(sub[first_key])[:200])
+                log.info("History API raw type=%s preview=%s", type(data).__name__, str(data)[:500])
                 first_call = False
+                if not data:
+                    # Try a single known bond to verify endpoint works at all
+                    log.warning("Empty response — check items/tgId. First batch ids: %s",
+                                [it["id"] for it in items])
 
-            inner = data.get("response") or data
-            chart_data = (inner.get("data") if isinstance(inner, dict) else None) or {}
-            if not isinstance(chart_data, dict):
+            # Response can be: dict with "response" key, plain dict, or list of per-bond dicts
+            if isinstance(data, list):
+                # [{bondId: X, data: [[ts, val], ...]}, ...]
+                chart_data = {str(item["bondId"]): item.get("data", [])
+                              for item in data if isinstance(item, dict) and "bondId" in item}
+            elif isinstance(data, dict):
+                inner = data.get("response") or data
+                if isinstance(inner, dict):
+                    chart_data = inner.get("data") or {}
+                    if not isinstance(chart_data, dict):
+                        # might be a list of per-bond objects inside response
+                        if isinstance(chart_data, list):
+                            chart_data = {str(item["bondId"]): item.get("data", [])
+                                          for item in chart_data if isinstance(item, dict) and "bondId" in item}
+                        else:
+                            chart_data = {}
+                else:
+                    chart_data = {}
+            else:
+                chart_data = {}
+
+            if not chart_data:
+                log.debug("No chart data in response (chart_type=%s)", chart_type)
                 continue
 
             target = price_series if chart_type == "price" else yield_series
@@ -838,10 +861,11 @@ def fetch_all_bonds_via_api() -> list[dict]:
         yield_raw = yield_num * 100 if yield_num is not None else bond.get("tradings_yield_effect")
         currency = bond.get("currency_name") or _parse_currency(name)
 
-        cbonds_id = bond.get("id.numeric")
+        raw_id = bond.get("id.numeric") or bond.get("id")
+        cbonds_id = int(raw_id) if raw_id is not None else None
 
         # Parse trading ground ID from "(0,77,0)" format for history fetch
-        tg_raw = bond.get("ss_current_trading_grounds", "")
+        tg_raw = bond.get("ss_current_trading_grounds") or ""
         tg_ids = [int(x) for x in re.findall(r'\d+', tg_raw) if x != '0']
         tg_id = tg_ids[0] if tg_ids else 77
 
@@ -927,13 +951,69 @@ def main():
         log.error("playwright not installed. Run: pip install playwright")
         sys.exit(1)
 
-    # ── Setup session (one-time, interactive) ─────────────────────────────
+    # ── Normal ingest — no browser needed when session file exists ─────────
+    # All discover/setup flags require Playwright; the ingest path uses urllib directly.
+    needs_browser = (
+        args.setup_session
+        or args.discover_login
+        or args.discover_bonds
+        or args.discover_xhr
+        or args.discover_bond_history
+    )
+
+    if not needs_browser:
+        if not SESSION_FILE.exists():
+            log.error(
+                "No saved session found. "
+                "Run:  python scripts/ingest_cbonds.py --setup-session"
+            )
+            sys.exit(1)
+
+        rows = fetch_all_bonds_via_api()
+        if not rows:
+            log.error(
+                "API fetch returned no data — session may have expired.\n"
+                "Run --setup-session to refresh cookies, or --discover-bonds to debug."
+            )
+            sys.exit(1)
+
+        if args.dry_run:
+            for r in rows:
+                print(r)
+            log.info("Dry run — %d rows parsed, none inserted", len(rows))
+            return
+
+        n = upsert(rows)
+        log.info("Upserted %d bond rows into otc_trades", n)
+
+        if not args.skip_history:
+            # Snapshot today's price/yield for ALL bonds into bond_price_history.
+            # The Cbonds chart API returns empty for eurobonds; daily snapshots
+            # from this ingest are how history accumulates for those bonds.
+            snapshot_rows = [
+                {
+                    "bond_name":  r["bond_name"],
+                    "cbonds_id":  r.get("cbonds_id"),
+                    "trade_date": r["trade_date"],
+                    "price":      r.get("price"),
+                    "yield":      r.get("yield"),
+                    "currency":   r.get("currency"),
+                }
+                for r in rows
+                if r.get("yield") is not None or r.get("price") is not None
+            ]
+            hn = upsert_history(snapshot_rows)
+            log.info("Snapshotted %d bond rows into bond_price_history", hn)
+        else:
+            log.info("--skip-history set — skipping history snapshot")
+        return
+
+    # ── Browser-required paths (setup/discover) ────────────────────────────
     with sync_playwright() as p:
         if args.setup_session:
             setup_session(p)
             sys.exit(0)
 
-        # Determine auth method: saved session file takes priority over form login
         storage_state = None
         if SESSION_FILE.exists():
             log.info("Loading saved session from %s", SESSION_FILE)
@@ -1230,52 +1310,7 @@ def main():
             browser.close()
             sys.exit(0)
 
-        # ── Full ingest — try direct API first (no table scraping needed) ──
-        rows = fetch_all_bonds_via_api()
-        if not rows:
-            log.info("API fetch returned no data — falling back to Playwright table scrape")
-            bond_url = fetch_bond_page(page)
-            if bond_url is None:
-                log.error(
-                    "No Mongolia bond page found. "
-                    "Run --discover-bonds to inspect which URLs are accessible."
-                )
-                browser.close()
-                sys.exit(1)
-
-            rows = scrape_via_page_evaluate(page)
-            if not rows:
-                rows = parse_tables_from_html(page.content())
-
         browser.close()
-
-    if not rows:
-        log.error(
-            "No bond data extracted. "
-            "Run --discover-bonds to inspect page structure."
-        )
-        sys.exit(1)
-
-    if args.dry_run:
-        for r in rows:
-            print(r)
-        log.info("Dry run — %d rows parsed, none inserted", len(rows))
-        return
-
-    n = upsert(rows)
-    log.info("Upserted %d bond rows into otc_trades", n)
-
-    if not args.skip_history:
-        eurobonds = [
-            r for r in rows
-            if r.get("currency") and r.get("currency") != "MNT" and r.get("cbonds_id")
-        ]
-        log.info("Fetching 90-day price/yield history for %d eurobonds…", len(eurobonds))
-        hist_rows = fetch_history_via_api(eurobonds)
-        hn = upsert_history(hist_rows)
-        log.info("Done — %d history rows upserted into bond_price_history", hn)
-    else:
-        log.info("--skip-history set — skipping history fetch")
 
 
 if __name__ == "__main__":
