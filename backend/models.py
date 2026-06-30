@@ -57,6 +57,7 @@ class OtcTrade(Base):
     value: Mapped[Optional[Decimal]] = mapped_column(Numeric, nullable=True)
     trade_date: Mapped[date] = mapped_column(Date, nullable=False)
     market_type: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    currency: Mapped[Optional[str]] = mapped_column(String(10), nullable=True)
 
 
 class Macro(Base):

@@ -59,6 +59,7 @@ class OtcTradeOut(BaseModel):
     volume: Optional[int] = None
     value: Optional[Decimal] = None
     market_type: Optional[str] = None
+    currency: Optional[str] = None
 
     @field_serializer("price", "value")
     def serialize_decimal(self, v: Optional[Decimal]) -> Optional[str]:

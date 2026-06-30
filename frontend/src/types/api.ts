@@ -41,6 +41,7 @@ export interface OtcTrade {
   volume: number | null;
   value: string | null;
   market_type: string | null;
+  currency: string | null;
 }
 
 export interface OtcBondRegistry {

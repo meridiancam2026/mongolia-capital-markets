@@ -1,18 +1,20 @@
 import { useState, useEffect } from 'react';
 import { MarketView } from './views/MarketView';
-import { OtcView } from './views/OtcView';
+import { LocalBondsView } from './views/LocalBondsView';
+import { EurobondsView } from './views/EurobondsView';
 import { MacroView } from './views/MacroView';
 import { RegulatoryView } from './views/RegulatoryView';
 import { CommoditiesView } from './views/CommoditiesView';
 
-type Tab = 'market' | 'otc' | 'macro' | 'regulatory' | 'commodities';
+type Tab = 'market' | 'local-bonds' | 'eurobonds' | 'macro' | 'regulatory' | 'commodities';
 
 const TABS: { id: Tab; label: string; short: string }[] = [
-  { id: 'market',      label: 'Equities',    short: 'EQ'  },
-  { id: 'otc',         label: 'OTC Bonds',   short: 'OTC' },
-  { id: 'macro',       label: 'Macro',       short: 'MCR' },
-  { id: 'regulatory',  label: 'Regulatory',  short: 'REG' },
-  { id: 'commodities', label: 'Commodities', short: 'CMD' },
+  { id: 'market',      label: 'Equities',     short: 'EQ'  },
+  { id: 'local-bonds', label: 'Local Bonds',  short: 'LCL' },
+  { id: 'eurobonds',   label: 'Eurobonds',    short: 'EUR' },
+  { id: 'macro',       label: 'Macro',        short: 'MCR' },
+  { id: 'regulatory',  label: 'Regulatory',   short: 'REG' },
+  { id: 'commodities', label: 'Commodities',  short: 'CMD' },
 ];
 
 const S = {
@@ -130,7 +132,7 @@ export default function App() {
 
         {/* Content — display:none preserves mount & hook state across tabs */}
         <div style={{ flex: 1, overflow: 'hidden', position: 'relative' }}>
-          {(['market', 'otc', 'macro', 'regulatory', 'commodities'] as const).map((tab) => (
+          {(['market', 'local-bonds', 'eurobonds', 'macro', 'regulatory', 'commodities'] as const).map((tab) => (
             <div
               key={tab}
               style={{
@@ -140,7 +142,8 @@ export default function App() {
               }}
             >
               {tab === 'market'      && <MarketView />}
-              {tab === 'otc'         && <OtcView />}
+              {tab === 'local-bonds' && <LocalBondsView />}
+              {tab === 'eurobonds'   && <EurobondsView />}
               {tab === 'macro'       && <MacroView />}
               {tab === 'regulatory'  && <RegulatoryView />}
               {tab === 'commodities' && <CommoditiesView />}

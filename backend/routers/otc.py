@@ -1,6 +1,6 @@
-from typing import Annotated
+from typing import Annotated, Literal, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Query
 from sqlalchemy import func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -12,13 +12,19 @@ router = APIRouter()
 
 
 @router.get("", response_model=list[OtcTradeOut])
-async def list_otc(db: Annotated[AsyncSession, Depends(get_db)]):
+async def list_otc(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    segment: Optional[Literal["local", "eurobond"]] = Query(None),
+):
     max_date = select(func.max(OtcTrade.trade_date)).scalar_subquery()
-    stmt = (
-        select(OtcTrade)
-        .where(OtcTrade.trade_date == max_date)
-        .order_by(OtcTrade.value.desc().nulls_last())
-    )
+    stmt = select(OtcTrade).where(OtcTrade.trade_date == max_date)
+
+    if segment == "local":
+        stmt = stmt.where(OtcTrade.currency == "MNT")
+    elif segment == "eurobond":
+        stmt = stmt.where(OtcTrade.currency != "MNT")
+
+    stmt = stmt.order_by(OtcTrade.value.desc().nulls_last())
     result = await db.execute(stmt)
     return result.scalars().all()
 

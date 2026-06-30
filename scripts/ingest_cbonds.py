@@ -48,8 +48,9 @@ CBONDS_LOGIN_URL  = "https://cbonds.com/login/"
 SESSION_FILE      = _project_root / "logs" / "cbonds_session.json"
 
 # Mongolia bond listing page candidates — tried in order after login.
-# The confirmed working URL (with status/country filters) is first.
+# No status filter = all bonds (active + historical). Status-filtered is fallback.
 MONGOLIA_BOND_URLS = [
+    "https://cbonds.com/bonds/?emitent_country_id=3-sg&order=document&dir=asc",
     "https://cbonds.com/bonds/?emitent_country_id=3-sg&status_id=5-1z141z4&order=document&dir=asc",
     "https://cbonds.com/bonds/?country=Mongolia",
     "https://cbonds.com/emissions/?country=Mongolia",
@@ -58,14 +59,15 @@ MONGOLIA_BOND_URLS = [
 ]
 
 UPSERT_SQL = """
-INSERT INTO otc_trades (bond_name, price, yield, volume, value, trade_date, market_type)
-VALUES (%(bond_name)s, %(price)s, %(yield)s, %(volume)s, %(value)s, %(trade_date)s, %(market_type)s)
+INSERT INTO otc_trades (bond_name, price, yield, volume, value, trade_date, market_type, currency)
+VALUES (%(bond_name)s, %(price)s, %(yield)s, %(volume)s, %(value)s, %(trade_date)s, %(market_type)s, %(currency)s)
 ON CONFLICT (bond_name, trade_date) DO UPDATE SET
     price       = EXCLUDED.price,
     yield       = EXCLUDED.yield,
     volume      = EXCLUDED.volume,
     value       = EXCLUDED.value,
-    market_type = EXCLUDED.market_type
+    market_type = EXCLUDED.market_type,
+    currency    = EXCLUDED.currency
 """
 
 
@@ -216,6 +218,16 @@ def _parse_date(raw: str) -> date | None:
     return None
 
 
+def _parse_currency(bond_name: str) -> str | None:
+    """Extract ISO currency code from end of bond name like '..., MNT' or '..., USD'."""
+    parts = bond_name.rsplit(",", 1)
+    if len(parts) == 2:
+        candidate = parts[1].strip().upper()
+        if re.match(r'^[A-Z]{3}$', candidate):
+            return candidate
+    return None
+
+
 def _col_index(headers: list[str], *patterns: str) -> int | None:
     pats = [re.compile(p, re.I) for p in patterns]
     for i, h in enumerate(headers):
@@ -290,18 +302,15 @@ def parse_tables_from_html(html: str) -> list[dict]:
                 "value":       None,
                 "trade_date":  trade_date,
                 "market_type": "cbonds",
+                "currency":    _parse_currency(bond_name),
             })
 
     log.info("Parsed %d bond rows from HTML tables", len(rows_out))
     return rows_out
 
 
-def scrape_via_page_evaluate(page) -> list[dict]:
-    """
-    Extract bond rows from the Cbonds bond listing table via JS DOM evaluation.
-    Table 9 (confirmed) has headers: Issue, ISIN, Indicative price %, Indicative yield %, ...
-    Skips calendar tables (Mon/Tue/Wed headers) and column-picker rows.
-    """
+def _extract_table_rows(page) -> list[dict]:
+    """Extract bond rows from the current page state."""
     today = date.today()
     rows_out = []
 
@@ -324,40 +333,23 @@ def scrape_via_page_evaluate(page) -> list[dict]:
         if not table or len(table) < 2:
             continue
         headers = table[0]
-
-        # Skip calendar tables (Mon/Tue/Wed) and empty-header tables
         if not headers or headers[0] in ("Mon", ""):
             continue
-        # Skip tables with fewer than 3 data rows (column-picker headers, UI widgets)
         if len(table) < 4:
             continue
-        # Skip tables where most headers are "Hide" (column picker)
         hide_count = sum(1 for h in headers if h == "Hide")
         if hide_count > len(headers) / 2:
             continue
 
-        log.debug("JS table %d headers (first 6): %s", t_idx, headers[:6])
-
-        # Column detection — Cbonds confirmed header names
-        name_col  = _col_index(headers,
-                        r"^issue$|^bond$|^emission$|^name$|^security$",
-                        r"issue|bond name")
+        name_col  = _col_index(headers, r"^issue$|^bond$|^emission$|^name$|^security$", r"issue|bond name")
         if name_col is None:
-            # Fallback: first non-ISIN text column
             name_col = _col_index(headers, r"issue|name|bond|security|emission|ticker|title")
         price_col = _col_index(headers, r"indicative price|price")
         yield_col = _col_index(headers, r"indicative yield|yield|ytm")
         isin_col  = _col_index(headers, r"^isin$|isin")
-        mat_col   = _col_index(headers, r"^maturity$|maturity date")
 
         if name_col is None:
-            log.debug("Table %d: no name column — skipping", t_idx)
             continue
-
-        log.info(
-            "Scraping table %d (%d data rows): name=%d price=%s yield=%s isin=%s",
-            t_idx, len(table) - 1, name_col, price_col, yield_col, isin_col,
-        )
 
         for row in table[1:]:
             if len(row) <= name_col:
@@ -368,17 +360,12 @@ def scrape_via_page_evaluate(page) -> list[dict]:
 
             bond_name = gcell(name_col)
             if not bond_name or bond_name in ("-", "—", "Hide", "Issue"):
+                log.debug("Skipped row (name=%r): %s", bond_name, row[:6])
                 continue
 
-            # Use ISIN as part of name if available and name is too short
             isin = gcell(isin_col)
             if len(bond_name) < 3 and isin:
                 bond_name = isin
-
-            mat_raw    = gcell(mat_col)
-            trade_date = _parse_date(mat_raw) or today
-            # trade_date for otc_trades = today (maturity is a bond attribute, not trade date)
-            trade_date = today
 
             rows_out.append({
                 "bond_name":   bond_name[:200],
@@ -388,10 +375,81 @@ def scrape_via_page_evaluate(page) -> list[dict]:
                 "value":       None,
                 "trade_date":  today,
                 "market_type": "cbonds",
+                "currency":    _parse_currency(bond_name),
             })
 
-    log.info("Extracted %d bond rows via JS DOM", len(rows_out))
     return rows_out
+
+
+def scrape_via_page_evaluate(page) -> list[dict]:
+    """
+    Scrape all bond rows from the Cbonds bond listing, paginating through
+    every page by clicking the next-page button until it disappears.
+    """
+    all_rows: list[dict] = []
+    seen_names: set[str] = set()
+    page_num = 1
+
+    # Next-page button selectors — Cbonds uses various patterns
+    NEXT_SELECTORS = [
+        'a[rel="next"]',
+        'a:has-text("Next")',
+        'button:has-text("Next")',
+        '[class*="next"]:not([disabled])',
+        '[aria-label*="next" i]:not([disabled])',
+        '.pagination li:last-child a',
+        'a[class*="next"]:not([class*="disabled"])',
+    ]
+
+    while True:
+        log.info("Scraping page %d…", page_num)
+
+        # Wait for bond table to be present on this page
+        try:
+            page.wait_for_selector(
+                "th:has-text('Issue'), th:has-text('Indicative price')",
+                timeout=15_000,
+            )
+        except Exception:
+            log.debug("Bond table header not found on page %d", page_num)
+
+        rows = _extract_table_rows(page)
+        new_rows = [r for r in rows if r["bond_name"] not in seen_names]
+        seen_names.update(r["bond_name"] for r in new_rows)
+        all_rows.extend(new_rows)
+        log.info("Page %d: %d new rows (total %d)", page_num, len(new_rows), len(all_rows))
+
+        # Stop if this page added nothing new (dedup guard)
+        if not new_rows and page_num > 1:
+            log.info("No new bonds on page %d — stopping", page_num)
+            break
+
+        # Find and click the next-page button
+        next_btn = None
+        for sel in NEXT_SELECTORS:
+            try:
+                el = page.locator(sel).first
+                if el.count() > 0 and el.is_visible(timeout=1_000):
+                    next_btn = el
+                    log.debug("Next-page button found: %s", sel)
+                    break
+            except Exception:
+                pass
+
+        if next_btn is None:
+            log.info("No next-page button found — all pages scraped")
+            break
+
+        try:
+            with page.expect_navigation(wait_until="domcontentloaded", timeout=15_000):
+                next_btn.click()
+            page_num += 1
+        except Exception as e:
+            log.info("Navigation after next-page click: %s — stopping", e)
+            break
+
+    log.info("Extracted %d bond rows across %d page(s)", len(all_rows), page_num)
+    return all_rows
 
 
 def fetch_bond_page(page) -> str | None:
@@ -457,6 +515,157 @@ def upsert(rows: list[dict]) -> int:
     return count
 
 
+def fetch_all_bonds_via_api() -> list[dict]:
+    """
+    POST https://cbonds.com/api/bonds/search/ using saved session cookies.
+    Paginates with offset until all Mongolia bonds are fetched.
+    No browser required — uses urllib from stdlib.
+    """
+    import urllib.request
+    import urllib.error
+
+    if not SESSION_FILE.exists():
+        log.warning("No session file at %s — run --setup-session first", SESSION_FILE)
+        return []
+
+    with open(SESSION_FILE) as f:
+        storage = json.load(f)
+
+    cookies = storage.get("cookies", [])
+    cookie_header = "; ".join(
+        f"{c['name']}={c['value']}"
+        for c in cookies
+        if "cbonds.com" in c.get("domain", "")
+    )
+    cbonds_cookie_count = sum(1 for c in cookies if "cbonds.com" in c.get("domain", ""))
+    log.info("Loaded %d cbonds cookies from session file", cbonds_cookie_count)
+
+    SEARCH_URL = "https://cbonds.com/api/bonds/search/"
+    LIMIT = 100
+    all_items: list[dict] = []
+    offset = 0
+
+    while True:
+        body = {
+            "filters": [
+                {"field": "show_global", "operator": "eq", "value": 1},
+                {"field": "emitent_country_id", "operator": "in", "value": ["106"]},
+            ],
+            "sorting": [{"field": "document", "order": "asc"}],
+            "quantity": {"offset": offset, "limit": LIMIT, "page": offset // LIMIT + 1},
+            "lang": "eng",
+            "expand_rel_fields": [
+                "emitent_country", "status_id", "emitent_branch_id",
+                "emitent_type", "coupon_type_id", "kind_id", "subkind_id", "bond_rank",
+            ],
+            "fromPreConfig": False,
+        }
+
+        payload = json.dumps(body).encode("utf-8")
+        req = urllib.request.Request(
+            SEARCH_URL,
+            data=payload,
+            headers={
+                "Content-Type": "application/json",
+                "Accept": "application/json, text/plain, */*",
+                "Accept-Language": "en-US,en;q=0.9",
+                "Cookie": cookie_header,
+                "Origin": "https://cbonds.com",
+                "Referer": "https://cbonds.com/bonds/",
+                "User-Agent": (
+                    "Mozilla/5.0 (X11; Linux x86_64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/125.0.0.0 Safari/537.36"
+                ),
+            },
+            method="POST",
+        )
+
+        log.info("API fetch: offset=%d limit=%d", offset, LIMIT)
+        try:
+            with urllib.request.urlopen(req, timeout=30) as resp:
+                data = json.loads(resp.read())
+        except urllib.error.HTTPError as e:
+            preview = e.read()[:300].decode("utf-8", errors="replace")
+            log.error("API HTTP %d: %s", e.code, preview)
+            if e.code == 401:
+                log.error("Session expired — run --setup-session to refresh cookies")
+            break
+        except Exception as e:
+            log.error("API request failed: %s", e)
+            break
+
+        if offset == 0:
+            log.info("API response keys: %s", list(data.keys()))
+
+        # Cbonds wraps the payload inside data["response"]
+        inner = data.get("response") or data
+        if isinstance(inner, dict):
+            total = inner.get("total") or inner.get("count") or inner.get("total_count")
+            if total is not None and offset == 0:
+                log.info("Total Mongolia bonds on Cbonds: %d", total)
+            items = inner.get("data") or inner.get("items") or inner.get("results") or []
+        else:
+            items = inner if isinstance(inner, list) else []
+
+        if not items:
+            log.info("No more items at offset=%d — pagination done", offset)
+            break
+
+        log.info("Batch: %d items (offset=%d)", len(items), offset)
+        all_items.extend(items)
+
+        if len(items) < LIMIT:
+            break  # last page
+
+        offset += LIMIT
+
+    log.info("Total raw items from API: %d", len(all_items))
+    if not all_items:
+        return []
+
+    today = date.today()
+    rows: list[dict] = []
+    seen: set[str] = set()
+
+    for bond in all_items:
+        isin = (bond.get("isin_code") or "").strip()
+        name = (bond.get("document") or isin or "").strip()
+        if not name:
+            continue
+        # Deduplicate by ISIN first, then by display name
+        dedup_key = isin if isin else name
+        if dedup_key in seen:
+            continue
+        seen.add(dedup_key)
+        name = name[:200]
+
+        price_raw = (
+            bond.get("indicative_price")
+            or bond.get("last_price")
+            or bond.get("marketprice")
+        )
+        yield_raw = (
+            bond.get("indicative_yield")
+            or bond.get("ytm_offer")
+            or bond.get("ytm_bid")
+        )
+
+        rows.append({
+            "bond_name":   name,
+            "price":       _dec(price_raw),
+            "yield":       _dec(yield_raw),
+            "volume":      None,
+            "value":       None,
+            "trade_date":  today,
+            "market_type": "cbonds",
+            "currency":    _parse_currency(name),
+        })
+
+    log.info("Parsed %d unique bond rows from API", len(rows))
+    return rows
+
+
 def setup_session(playwright):
     """
     Open a visible browser window so the user can log in manually (including
@@ -505,6 +714,8 @@ def main():
                         help="Screenshot login page, print form fields, and exit")
     parser.add_argument("--discover-bonds", action="store_true",
                         help="Login then screenshot bond listing page and exit")
+    parser.add_argument("--discover-xhr", action="store_true",
+                        help="Intercept all XHR/fetch requests while bond page loads")
     parser.add_argument("--dry-run", action="store_true",
                         help="Parse and print rows but do not write to DB")
     args = parser.parse_args()
@@ -639,24 +850,142 @@ def main():
                 }));
             }""")
             for t in header_data:
-                print(f"  Table {t['index']}: {t['rows']} rows, headers={t['headers']}")
+                print(f"  Table {t['index']}: {t['rows']} rows, headers={t['headers'][:6]}")
+
+            # Pagination discovery
+            print("\n=== Pagination / totals ===")
+            page_info = page.evaluate("""() => {
+                // Look for total-count text anywhere on page
+                const all = Array.from(document.querySelectorAll('*'));
+                const countEls = all.filter(el =>
+                    el.children.length === 0 &&
+                    /\\d+\\s*(bonds?|result|record|issue|emission)/i.test(el.innerText || '')
+                ).map(el => el.innerText.trim()).slice(0, 10);
+
+                // Pagination buttons / links
+                const pageLinks = Array.from(document.querySelectorAll(
+                    'a[href*="page="], button[data-page], .pagination a, .pager a, ' +
+                    '[class*="pagination"] a, [class*="pager"] a, ' +
+                    '[aria-label*="next" i], [aria-label*="page" i]'
+                )).map(el => ({
+                    tag: el.tagName,
+                    text: (el.innerText || '').trim().substring(0, 30),
+                    href: el.href || '',
+                    label: el.getAttribute('aria-label') || ''
+                })).slice(0, 15);
+
+                // Look for "show all" or limit controls
+                const showAll = Array.from(document.querySelectorAll(
+                    'a[href*="show_all"], a[href*="limit="], select[name*="limit"], ' +
+                    'select[name*="per_page"], [class*="show-all"], [class*="showAll"]'
+                )).map(el => ({
+                    tag: el.tagName,
+                    text: (el.innerText || el.value || '').trim().substring(0, 40),
+                    href: el.href || el.value || ''
+                }));
+
+                // Current URL params
+                const params = Object.fromEntries(new URLSearchParams(window.location.search));
+
+                return { countEls, pageLinks, showAll, params };
+            }""")
+            print(f"  URL params:  {page_info['params']}")
+            print(f"  Count texts: {page_info['countEls']}")
+            print(f"  Show-all controls: {page_info['showAll']}")
+            print(f"  Pagination links ({len(page_info['pageLinks'])}):")
+            for pl in page_info['pageLinks']:
+                print(f"    {pl}")
+
+            # Try scrolling to bottom to trigger lazy load, then recount
+            page.evaluate("window.scrollTo(0, document.body.scrollHeight)")
+            page.wait_for_timeout(2000)
+            n_after_scroll = len(page.query_selector_all("table tr"))
+            print(f"\n  Rows after scroll-to-bottom: {n_after_scroll} (was {n_rows})")
 
             browser.close()
             sys.exit(0)
 
-        # ── Full ingest ──────────────────────────────────────────────────
-        bond_url = fetch_bond_page(page)
-        if bond_url is None:
-            log.error(
-                "No Mongolia bond page found. "
-                "Run --discover-bonds to inspect which URLs are accessible."
-            )
-            browser.close()
-            sys.exit(1)
+        # ── Discover XHR endpoints ───────────────────────────────────────
+        if args.discover_xhr:
+            api_captures: list[dict] = []
 
-        rows = scrape_via_page_evaluate(page)
+            def _on_response(resp):
+                url = resp.url
+                if "cbonds.com/api/" in url:
+                    try:
+                        body = resp.json()
+                    except Exception:
+                        body = resp.text()[:500]
+                    api_captures.append({
+                        "url": url,
+                        "status": resp.status,
+                        "body_preview": body,
+                    })
+
+            def _on_request(req):
+                if "cbonds.com/api/" in req.url:
+                    try:
+                        post_data = req.post_data
+                    except Exception:
+                        post_data = None
+                    api_captures.append({
+                        "url": req.url,
+                        "method": req.method,
+                        "post_data": post_data,
+                    })
+
+            page.on("request",  _on_request)
+            page.on("response", _on_response)
+
+            bond_url = MONGOLIA_BOND_URLS[0]
+            log.info("Loading %s with API interception…", bond_url)
+            page.goto(bond_url, wait_until="domcontentloaded", timeout=25_000)
+            page.wait_for_timeout(5_000)
+
+            print(f"\n=== cbonds.com/api/ calls captured ===")
+            for cap in api_captures:
+                if "method" in cap:
+                    print(f"\n  → {cap['method']} {cap['url']}")
+                    if cap.get("post_data"):
+                        print(f"    POST body: {cap['post_data'][:500]}")
+                else:
+                    print(f"\n  ← HTTP {cap['status']} {cap['url']}")
+                    preview = cap.get("body_preview", "")
+                    if isinstance(preview, dict):
+                        # Print top-level keys + count
+                        keys = list(preview.keys())
+                        print(f"    JSON keys: {keys}")
+                        for k in ("total", "count", "total_count", "found", "num"):
+                            if k in preview:
+                                print(f"    {k}: {preview[k]}")
+                        if "data" in preview:
+                            print(f"    data[0]: {str(preview['data'][0])[:200] if preview['data'] else '[]'}")
+                        elif "items" in preview:
+                            print(f"    items[0]: {str(preview['items'][0])[:200] if preview['items'] else '[]'}")
+                        elif "results" in preview:
+                            print(f"    results[0]: {str(preview['results'][0])[:200] if preview['results'] else '[]'}")
+                    else:
+                        print(f"    body: {str(preview)[:300]}")
+
+            browser.close()
+            sys.exit(0)
+
+        # ── Full ingest — try direct API first (no table scraping needed) ──
+        rows = fetch_all_bonds_via_api()
         if not rows:
-            rows = parse_tables_from_html(page.content())
+            log.info("API fetch returned no data — falling back to Playwright table scrape")
+            bond_url = fetch_bond_page(page)
+            if bond_url is None:
+                log.error(
+                    "No Mongolia bond page found. "
+                    "Run --discover-bonds to inspect which URLs are accessible."
+                )
+                browser.close()
+                sys.exit(1)
+
+            rows = scrape_via_page_evaluate(page)
+            if not rows:
+                rows = parse_tables_from_html(page.content())
 
         browser.close()
 
