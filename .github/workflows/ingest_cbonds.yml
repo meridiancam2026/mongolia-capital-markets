@@ -1,0 +1,27 @@
+name: Cbonds Bond Data Ingest
+
+on:
+  schedule:
+    # 23:00 UTC = 07:00 Ulaanbaatar time (UTC+8)
+    - cron: '0 23 * * *'
+  workflow_dispatch:
+
+jobs:
+  ingest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: pip install -r requirements-prod.txt
+
+      - name: Run Cbonds scraper
+        run: python scripts/ingest_cbonds.py
+        env:
+          DATABASE_URL: ${{ secrets.DATABASE_URL }}
+          CBONDS_SESSION_B64: ${{ secrets.CBONDS_SESSION_B64 }}
+          LOG_LEVEL: INFO

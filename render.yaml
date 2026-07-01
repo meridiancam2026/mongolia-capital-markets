@@ -17,42 +17,6 @@ services:
       - key: CORS_ORIGINS
         sync: false
 
-  - type: cron
-    name: mongolia-mse-ingest
-    runtime: python
-    # 01:00 UTC = 09:00 Ulaanbaatar time — after MSE open (09:30 UB)
-    schedule: "0 1,3,5 * * 1-5"
-    buildCommand: pip install -r requirements-prod.txt && playwright install chromium --with-deps
-    startCommand: python scripts/ingest_mse.py
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: mongolia-db
-          property: connectionString
-      - key: LOG_LEVEL
-        value: INFO
-
-  - type: cron
-    name: mongolia-cbonds-ingest
-    runtime: python
-    # 23:00 UTC = 07:00 Ulaanbaatar time (UTC+8)
-    schedule: "0 23 * * *"
-    buildCommand: pip install -r requirements-prod.txt
-    startCommand: python scripts/ingest_cbonds.py
-    envVars:
-      - key: DATABASE_URL
-        fromDatabase:
-          name: mongolia-db
-          property: connectionString
-      - key: CBONDS_SESSION_B64
-        sync: false
-      - key: CBONDS_USERNAME
-        sync: false
-      - key: CBONDS_PASSWORD
-        sync: false
-      - key: LOG_LEVEL
-        value: INFO
-
 databases:
   - name: mongolia-db
     databaseName: mongolia
