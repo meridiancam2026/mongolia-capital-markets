@@ -1,11 +1,12 @@
 import { useState, useCallback } from 'react';
+import type { OtcTrade } from '../types/api';
 import { OtcTable } from '../components/otc/OtcTable';
 import { OtcRegistryTable } from '../components/otc/OtcRegistryTable';
 import { Spinner } from '../components/ui/Spinner';
 import { ErrorBanner } from '../components/ui/ErrorBanner';
 import { useOtc } from '../hooks/useOtc';
 import { useOtcRegistry } from '../hooks/useOtcRegistry';
-import { apiPost } from '../api/client';
+import { apiPost, apiFetch, pollUntilChanged } from '../api/client';
 
 const S = {
   faint:   '#8a977c',
@@ -34,12 +35,17 @@ export function LocalBondsView() {
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
+    const snapshot = prices.data[0]?.price ?? prices.data[0]?.['yield'] ?? null;
     try {
       await apiPost('/api/admin/trigger/ingest_cbonds');
-    } catch {
-      // Non-fatal — still refetch from DB
+    } catch { /* non-fatal */ }
+    const fresh = await pollUntilChanged(
+      () => apiFetch<OtcTrade[]>('/api/otc?segment=local'),
+      (rows) => (rows[0]?.price ?? rows[0]?.['yield'] ?? null) !== snapshot,
+    );
+    if (fresh) {
+      prices.refetch();
     }
-    prices.refetch();
     setRefreshing(false);
   }, [prices]);
 

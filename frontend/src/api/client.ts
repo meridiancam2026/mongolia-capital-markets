@@ -21,3 +21,20 @@ export async function apiPost(path: string): Promise<void> {
     throw new ApiError(res.status, `${res.status} ${res.statusText}`);
   }
 }
+
+/** Poll `fetch` every `intervalMs` until `hasChanged` returns true or `maxAttempts` exceeded. */
+export async function pollUntilChanged<T>(
+  fetch: () => Promise<T>,
+  hasChanged: (data: T) => boolean,
+  intervalMs = 10_000,
+  maxAttempts = 9,
+): Promise<T | null> {
+  for (let i = 0; i < maxAttempts; i++) {
+    await new Promise<void>((r) => setTimeout(r, intervalMs));
+    try {
+      const data = await fetch();
+      if (hasChanged(data)) return data;
+    } catch { /* keep polling */ }
+  }
+  return null;
+}

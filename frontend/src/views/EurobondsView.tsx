@@ -4,7 +4,7 @@ import { BondHistoryChart } from '../components/otc/BondHistoryChart';
 import { Spinner } from '../components/ui/Spinner';
 import { ErrorBanner } from '../components/ui/ErrorBanner';
 import { useOtc } from '../hooks/useOtc';
-import { apiPost } from '../api/client';
+import { apiPost, apiFetch, pollUntilChanged } from '../api/client';
 import type { OtcTrade } from '../types/api';
 
 const S = {
@@ -38,12 +38,17 @@ export function EurobondsView() {
 
   const refresh = useCallback(async () => {
     setRefreshing(true);
+    const snapshot = prices.data[0]?.price ?? prices.data[0]?.['yield'] ?? null;
     try {
       await apiPost('/api/admin/trigger/ingest_cbonds');
-    } catch {
-      // Non-fatal — still refetch from DB
+    } catch { /* non-fatal */ }
+    const fresh = await pollUntilChanged(
+      () => apiFetch<OtcTrade[]>('/api/otc?segment=eurobond'),
+      (rows) => (rows[0]?.price ?? rows[0]?.['yield'] ?? null) !== snapshot,
+    );
+    if (fresh) {
+      prices.refetch();
     }
-    prices.refetch();
     setRefreshing(false);
   }, [prices]);
 

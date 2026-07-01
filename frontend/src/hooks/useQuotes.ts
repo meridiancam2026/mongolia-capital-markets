@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { apiFetch, apiPost, ApiError } from '../api/client';
+import { apiFetch, apiPost, pollUntilChanged, ApiError } from '../api/client';
 import type { Quote } from '../types/api';
 
 interface UseQuotesResult {
@@ -35,15 +35,23 @@ export function useQuotes(): UseQuotesResult {
   const refresh = useCallback(async () => {
     setRefreshing(true);
     setError(null);
+    const snapshot = data[0]?.trade_time ?? null;
     try {
-      // Fire workflow dispatch (async — completes in ~2 min in background)
       await apiPost('/api/admin/trigger/ingest_mse');
-    } catch {
-      // Non-fatal: workflow trigger failing shouldn't block the DB re-fetch
+    } catch { /* non-fatal */ }
+    // Poll every 10s until trade_time changes (workflow completes in ~30-60s with cache)
+    const fresh = await pollUntilChanged(
+      () => apiFetch<Quote[]>('/api/quotes'),
+      (rows) => (rows[0]?.trade_time ?? null) !== snapshot,
+    );
+    if (fresh) {
+      setData(fresh);
+      setLastUpdated(new Date());
+    } else {
+      await doFetch(false);
     }
-    await doFetch(false);
     setRefreshing(false);
-  }, [doFetch]);
+  }, [doFetch, data]);
 
   useEffect(() => {
     doFetch(false);
