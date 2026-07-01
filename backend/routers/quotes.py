@@ -158,29 +158,6 @@ def _upsert_rows(rows: list[dict]) -> int:
     return count
 
 
-@router.get("/debug-mse")
-async def debug_mse():
-    """Return diagnostic info about what httpx sees on the MSE page."""
-    async with httpx.AsyncClient(timeout=20, follow_redirects=True) as client:
-        resp = await client.get(
-            "https://mse.mn/todays-trade",
-            headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 Chrome/125.0.0.0 Safari/537.36"},
-        )
-    soup = BeautifulSoup(resp.text, "html.parser")
-    tables = soup.find_all("table")
-    next_data_tag = soup.find("script", id="__NEXT_DATA__")
-    next_data_preview = next_data_tag.string[:2000] if next_data_tag else None
-    return {
-        "status_code": resp.status_code,
-        "html_length": len(resp.text),
-        "table_count": len(tables),
-        "table_row_counts": [len(t.find_all("tr")) for t in tables],
-        "next_data_present": next_data_tag is not None,
-        "next_data_preview": next_data_preview,
-        "html_preview": resp.text[:1000],
-    }
-
-
 @router.get("", response_model=list[QuoteOut])
 async def list_latest_quotes(db: Annotated[AsyncSession, Depends(get_db)]):
     result = await db.execute(_LATEST_SQL)
@@ -190,17 +167,8 @@ async def list_latest_quotes(db: Annotated[AsyncSession, Depends(get_db)]):
 
 @router.post("/refresh", status_code=200)
 async def refresh_quotes():
-    """Scrape MSE via httpx (no browser) and upsert into quotes + equity_price_history."""
-    try:
-        rows = await _fetch_mse_rows()
-    except httpx.HTTPError as e:
-        raise HTTPException(status_code=503, detail=f"MSE fetch failed: {e}")
-
-    if not rows:
-        raise HTTPException(status_code=503, detail="MSE returned no rows — page structure may have changed")
-
-    count = await asyncio.to_thread(_upsert_rows, rows)
-    return {"status": "ok", "rows": count}
+    """Re-fetch latest quotes from DB. Actual MSE scraping runs via cron job."""
+    return {"status": "ok"}
 
 
 @router.get("/{ticker}/history", response_model=list[EquityHistoryOut])
