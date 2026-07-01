@@ -1,13 +1,17 @@
-import { useState } from 'react';
+import { useState, useCallback } from 'react';
 import { OtcTable } from '../components/otc/OtcTable';
 import { BondHistoryChart } from '../components/otc/BondHistoryChart';
 import { Spinner } from '../components/ui/Spinner';
 import { ErrorBanner } from '../components/ui/ErrorBanner';
 import { useOtc } from '../hooks/useOtc';
+import { apiPost } from '../api/client';
 import type { OtcTrade } from '../types/api';
 
 const S = {
-  faint: '#8a977c',
+  faint:   '#8a977c',
+  border:  '#d3dcc6',
+  surface: '#f4f7f1',
+  muted:   '#5d6a52',
 } as const;
 
 function SectionHeader({ title, sub }: { title: string; sub: string }) {
@@ -26,17 +30,51 @@ function SectionHeader({ title, sub }: { title: string; sub: string }) {
 export function EurobondsView() {
   const prices = useOtc('eurobond');
   const [selectedBond, setSelectedBond] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
 
   function handleRowClick(trade: OtcTrade) {
     setSelectedBond((prev) => (prev === trade.bond_name ? null : trade.bond_name));
   }
 
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await apiPost('/api/admin/trigger/ingest_cbonds');
+    } catch {
+      // Non-fatal — still refetch from DB
+    }
+    prices.refetch();
+    setRefreshing(false);
+  }, [prices]);
+
   return (
     <div>
-      <SectionHeader
-        title="MONGOLIAN EUROBONDS · INDICATIVE PRICES"
-        sub="USD / JPY / foreign-currency bonds · Click a row to view 90-day price & yield history · Source: Cbonds"
-      />
+      <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: 10 }}>
+        <SectionHeader
+          title="MONGOLIAN EUROBONDS · INDICATIVE PRICES"
+          sub="USD / JPY / foreign-currency bonds · Click a row to view 90-day price & yield history · Source: Cbonds"
+        />
+        <button
+          onClick={refresh}
+          disabled={refreshing}
+          title="Trigger Cbonds ingest and refresh bond prices"
+          style={{
+            fontSize: 9,
+            letterSpacing: '0.08em',
+            fontFamily: "'IBM Plex Mono', monospace",
+            fontWeight: 600,
+            color: refreshing ? S.faint : S.muted,
+            background: S.surface,
+            border: `1px solid ${S.border}`,
+            padding: '3px 10px',
+            cursor: refreshing ? 'not-allowed' : 'pointer',
+            opacity: refreshing ? 0.6 : 1,
+            flexShrink: 0,
+          }}
+        >
+          {refreshing ? 'REFRESHING…' : '↺ REFRESH'}
+        </button>
+      </div>
       {prices.error && <ErrorBanner message={prices.error} />}
       {prices.loading ? (
         <Spinner />

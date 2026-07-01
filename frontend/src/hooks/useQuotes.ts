@@ -36,9 +36,10 @@ export function useQuotes(): UseQuotesResult {
     setRefreshing(true);
     setError(null);
     try {
-      await apiPost('/api/quotes/refresh');
-    } catch (e) {
-      setError(e instanceof ApiError ? e.message : 'Refresh failed');
+      // Fire workflow dispatch (async — completes in ~2 min in background)
+      await apiPost('/api/admin/trigger/ingest_mse');
+    } catch {
+      // Non-fatal: workflow trigger failing shouldn't block the DB re-fetch
     }
     await doFetch(false);
     setRefreshing(false);

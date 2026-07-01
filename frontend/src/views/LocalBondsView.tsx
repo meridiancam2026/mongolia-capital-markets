@@ -1,13 +1,17 @@
+import { useState, useCallback } from 'react';
 import { OtcTable } from '../components/otc/OtcTable';
 import { OtcRegistryTable } from '../components/otc/OtcRegistryTable';
 import { Spinner } from '../components/ui/Spinner';
 import { ErrorBanner } from '../components/ui/ErrorBanner';
 import { useOtc } from '../hooks/useOtc';
 import { useOtcRegistry } from '../hooks/useOtcRegistry';
+import { apiPost } from '../api/client';
 
 const S = {
-  faint:  '#8a977c',
-  border: '#d3dcc6',
+  faint:   '#8a977c',
+  border:  '#d3dcc6',
+  surface: '#f4f7f1',
+  muted:   '#5d6a52',
 } as const;
 
 function SectionHeader({ title, sub }: { title: string; sub: string }) {
@@ -26,15 +30,49 @@ function SectionHeader({ title, sub }: { title: string; sub: string }) {
 export function LocalBondsView() {
   const prices = useOtc('local');
   const registry = useOtcRegistry();
+  const [refreshing, setRefreshing] = useState(false);
+
+  const refresh = useCallback(async () => {
+    setRefreshing(true);
+    try {
+      await apiPost('/api/admin/trigger/ingest_cbonds');
+    } catch {
+      // Non-fatal — still refetch from DB
+    }
+    prices.refetch();
+    setRefreshing(false);
+  }, [prices]);
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
 
       <div>
-        <SectionHeader
-          title="LOCAL BOND MARKET · INDICATIVE PRICES"
-          sub="MNT-denominated bonds · Indicative prices &amp; yields · Source: Cbonds"
-        />
+        <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+          <SectionHeader
+            title="LOCAL BOND MARKET · INDICATIVE PRICES"
+            sub="MNT-denominated bonds · Indicative prices &amp; yields · Source: Cbonds"
+          />
+          <button
+            onClick={refresh}
+            disabled={refreshing}
+            title="Trigger Cbonds ingest and refresh bond prices"
+            style={{
+              fontSize: 9,
+              letterSpacing: '0.08em',
+              fontFamily: "'IBM Plex Mono', monospace",
+              fontWeight: 600,
+              color: refreshing ? S.faint : S.muted,
+              background: S.surface,
+              border: `1px solid ${S.border}`,
+              padding: '3px 10px',
+              cursor: refreshing ? 'not-allowed' : 'pointer',
+              opacity: refreshing ? 0.6 : 1,
+              flexShrink: 0,
+            }}
+          >
+            {refreshing ? 'REFRESHING…' : '↺ REFRESH'}
+          </button>
+        </div>
         {prices.error && <ErrorBanner message={prices.error} />}
         {prices.loading ? <Spinner /> : <OtcTable trades={prices.data} />}
       </div>
